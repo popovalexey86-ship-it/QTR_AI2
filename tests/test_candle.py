@@ -1,5 +1,5 @@
 from datetime import datetime
-
+import pytest
 from core.candle import Candle
 
 
@@ -19,7 +19,6 @@ def test_create_candle():
     assert candle.low == 95.0
     assert candle.close == 105.0
     assert candle.volume == 2500.0
-    import pytest
 
 
 def test_candle_is_immutable():
