@@ -28,13 +28,10 @@ class BybitMapper:
         timeframe: str,
     ) -> MarketData:
 
-       candles = [
-           BybitMapper.to_candle(raw)
-           for raw in response["result"]["list"]
-       ]
+        candles = [BybitMapper.to_candle(raw) for raw in response["result"]["list"]]
 
-       return MarketData(
-           symbol=symbol,
-           timeframe=timeframe,
-           candles=candles,
-       )
+        return MarketData(
+            symbol=symbol,
+            timeframe=timeframe,
+            candles=candles,
+        )

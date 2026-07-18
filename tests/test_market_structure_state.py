@@ -34,4 +34,3 @@ def test_update_market_structure_state():
     state.last_hh = hh
 
     assert state.last_hh == hh
-    

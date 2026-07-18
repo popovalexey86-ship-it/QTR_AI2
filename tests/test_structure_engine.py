@@ -11,7 +11,12 @@ def create_swings_hh():
 
     return [
         Swing(index=2, timestamp=start, price=100, type=SwingType.HIGH),
-        Swing(index=8, timestamp=start + timedelta(minutes=30), price=110, type=SwingType.HIGH),
+        Swing(
+            index=8,
+            timestamp=start + timedelta(minutes=30),
+            price=110,
+            type=SwingType.HIGH,
+        ),
     ]
 
 
@@ -20,7 +25,12 @@ def create_swings_hl():
 
     return [
         Swing(index=2, timestamp=start, price=100, type=SwingType.LOW),
-        Swing(index=8, timestamp=start + timedelta(minutes=30), price=110, type=SwingType.LOW),
+        Swing(
+            index=8,
+            timestamp=start + timedelta(minutes=30),
+            price=110,
+            type=SwingType.LOW,
+        ),
     ]
 
 
@@ -29,7 +39,12 @@ def create_swings_lh():
 
     return [
         Swing(index=2, timestamp=start, price=110, type=SwingType.HIGH),
-        Swing(index=8, timestamp=start + timedelta(minutes=30), price=100, type=SwingType.HIGH),
+        Swing(
+            index=8,
+            timestamp=start + timedelta(minutes=30),
+            price=100,
+            type=SwingType.HIGH,
+        ),
     ]
 
 
@@ -38,7 +53,12 @@ def create_swings_ll():
 
     return [
         Swing(index=2, timestamp=start, price=110, type=SwingType.LOW),
-        Swing(index=8, timestamp=start + timedelta(minutes=30), price=100, type=SwingType.LOW),
+        Swing(
+            index=8,
+            timestamp=start + timedelta(minutes=30),
+            price=100,
+            type=SwingType.LOW,
+        ),
     ]
 
 

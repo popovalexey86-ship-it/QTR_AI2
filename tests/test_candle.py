@@ -1,4 +1,3 @@
-import pytest
 from datetime import datetime
 
 from core.candle import Candle

@@ -24,16 +24,10 @@ class TradeRequest:
 
     def __post_init__(self) -> None:
         if not self.symbol:
-            raise ValueError(
-                "Symbol cannot be empty."
-            )
+            raise ValueError("Symbol cannot be empty.")
 
         if self.volume <= 0:
-            raise ValueError(
-                "Volume must be greater than zero."
-            )
+            raise ValueError("Volume must be greater than zero.")
 
         if self.decision == Decision.SKIP:
-            raise ValueError(
-                "TradeRequest cannot be created with Decision.SKIP."
-            )
+            raise ValueError("TradeRequest cannot be created with Decision.SKIP.")

@@ -101,7 +101,8 @@ def test_keep_latest_structure_of_each_type():
     assert state.last_hl.price == 95
     assert state.last_lh.price == 105
     assert state.last_ll.price == 70
-    
+
+
 def test_shift_previous_hh():
     engine = MarketStructureEngine()
     state = MarketStructureState()
@@ -118,7 +119,8 @@ def test_shift_previous_hh():
 
     assert state.previous_hh == first
     assert state.last_hh == second
-    
+
+
 def test_shift_previous_ll():
     engine = MarketStructureEngine()
     state = MarketStructureState()

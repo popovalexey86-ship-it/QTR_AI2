@@ -22,15 +22,13 @@ class SwingDetector:
 
             candle = candles[i]
 
-            left = candles[i - self.window:i]
-            right = candles[i + 1:i + self.window + 1]
+            left = candles[i - self.window : i]
+            right = candles[i + 1 : i + self.window + 1]
 
             # ---------- Swing HIGH ----------
 
-            if (
-                all(candle.high > c.high for c in left)
-                and
-                all(candle.high > c.high for c in right)
+            if all(candle.high > c.high for c in left) and all(
+                candle.high > c.high for c in right
             ):
 
                 swings.append(
@@ -44,10 +42,8 @@ class SwingDetector:
 
             # ---------- Swing LOW ----------
 
-            if (
-                all(candle.low < c.low for c in left)
-                and
-                all(candle.low < c.low for c in right)
+            if all(candle.low < c.low for c in left) and all(
+                candle.low < c.low for c in right
             ):
 
                 swings.append(
