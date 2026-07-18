@@ -31,11 +31,7 @@ class BybitPositionMapper:
 
         side = position["side"]
 
-        decision = (
-            Decision.BUY
-            if side == "Buy"
-            else Decision.SELL
-        )
+        decision = Decision.BUY if side == "Buy" else Decision.SELL
 
         return Position(
             ticket=int(position.get("positionIdx", 0)),

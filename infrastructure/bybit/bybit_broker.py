@@ -63,9 +63,7 @@ class BybitBroker(Broker):
                 return positions[0]
             time.sleep(0.2)
 
-        raise BrokerError(
-            "Position was not found after order execution."
-        )
+        raise BrokerError("Position was not found after order execution.")
 
     def close_position(
         self,
@@ -105,8 +103,6 @@ class BybitBroker(Broker):
             if float(item.get("size", 0)) == 0:
                 continue
 
-            positions.append(
-                self._position_mapper.from_position(item)
-            )
+            positions.append(self._position_mapper.from_position(item))
 
         return positions

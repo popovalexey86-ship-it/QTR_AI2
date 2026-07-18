@@ -10,18 +10,15 @@ class Broker(ABC):
     def open_position(
         self,
         request: TradeRequest,
-    ) -> Position:
-        ...
+    ) -> Position: ...
 
     @abstractmethod
     def close_position(
         self,
         position: Position,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @abstractmethod
     def get_positions(
         self,
-    ) -> list[Position]:
-        ...
+    ) -> list[Position]: ...

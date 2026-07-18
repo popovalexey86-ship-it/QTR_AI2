@@ -1,4 +1,6 @@
+from core.bos import BOS
 from core.bos_type import BOSType
+from core.choch import CHOCH
 from core.choch_type import CHOCHType
 from core.market_structure_state import MarketStructureState
 from core.trend import Trend
@@ -11,17 +13,13 @@ class TrendEngine:
         state: MarketStructureState,
     ) -> None:
 
-        latest_event = None
+        latest_event: BOS | CHOCH | None = None
 
         if state.last_bos is not None:
             latest_event = state.last_bos
 
-        if (
-            state.last_choch is not None
-            and (
-                latest_event is None
-                or state.last_choch.index > latest_event.index
-            )
+        if state.last_choch is not None and (
+            latest_event is None or state.last_choch.index > latest_event.index
         ):
             latest_event = state.last_choch
 

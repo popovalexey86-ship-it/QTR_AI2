@@ -20,10 +20,7 @@ class BOSEngine:
             current = structures[i]
 
             # Bullish BOS
-            if (
-                previous.type == StructureType.HH
-                and current.type == StructureType.HH
-            ):
+            if previous.type == StructureType.HH and current.type == StructureType.HH:
                 bos_list.append(
                     BOS(
                         index=current.index,
@@ -34,10 +31,7 @@ class BOSEngine:
                 )
 
             # Bearish BOS
-            elif (
-                previous.type == StructureType.LL
-                and current.type == StructureType.LL
-            ):
+            elif previous.type == StructureType.LL and current.type == StructureType.LL:
                 bos_list.append(
                     BOS(
                         index=current.index,

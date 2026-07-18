@@ -10,11 +10,7 @@ class BybitOrderMapper:
         request: TradeRequest,
     ) -> dict:
 
-        side = (
-            "Buy"
-            if request.decision == Decision.BUY
-            else "Sell"
-        )
+        side = "Buy" if request.decision == Decision.BUY else "Sell"
 
         return {
             "symbol": request.symbol,
@@ -31,11 +27,7 @@ class BybitOrderMapper:
         position: Position,
     ) -> dict:
 
-        side = (
-            "Sell"
-            if position.decision == Decision.BUY
-            else "Buy"
-        )
+        side = "Sell" if position.decision == Decision.BUY else "Buy"
 
         return {
             "symbol": position.symbol,

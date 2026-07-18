@@ -23,13 +23,9 @@ class RiskManager:
         risk = abs(setup.entry - setup.stop_loss)
 
         if decision == Decision.BUY:
-            take_profit = (
-                setup.entry + risk * self._risk_reward
-            )
+            take_profit = setup.entry + risk * self._risk_reward
         else:
-            take_profit = (
-                setup.entry - risk * self._risk_reward
-            )
+            take_profit = setup.entry - risk * self._risk_reward
 
         return TradeRequest(
             symbol="BTCUSDT",

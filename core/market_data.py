@@ -19,9 +19,7 @@ class MarketData:
 
     candles: list[Candle] = field(default_factory=list)
 
-    loaded_at: datetime = field(
-        default_factory=lambda: datetime.now(UTC)
-    )
+    loaded_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @property
     def count(self) -> int:

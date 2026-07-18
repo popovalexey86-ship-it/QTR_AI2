@@ -5,8 +5,6 @@ from core.market_data import MarketData
 from infrastructure.bybit.bybit_mapper import BybitMapper
 
 
-
-
 def test_to_market_data():
 
     response = {

@@ -21,5 +21,6 @@ class Config:
             bybit_testnet=os.getenv(
                 "BYBIT_TESTNET",
                 "False",
-            ).lower() == "true",
+            ).lower()
+            == "true",
         )
