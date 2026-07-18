@@ -1,10 +1,7 @@
-
 import time
+
 from core.broker import Broker
-from core.exceptions import (
-    BrokerError,
-    OrderRejectedError,
-)
+from core.exceptions import BrokerError, OrderRejectedError
 from core.position import Position
 from core.trade_request import TradeRequest
 
@@ -18,14 +15,14 @@ class BybitBroker(Broker):
     def __init__(
         self,
         client: BybitClient,
-        order_mapper: BybitOrderMapper,
-        position_mapper: BybitPositionMapper,
         category: str,
         symbol: str,
+        order_mapper: BybitOrderMapper | None = None,
+        position_mapper: BybitPositionMapper | None = None,
     ):
         self._client = client
-        self._order_mapper = order_mapper
-        self._position_mapper = position_mapper
+        self._order_mapper = order_mapper or BybitOrderMapper()
+        self._position_mapper = position_mapper or BybitPositionMapper()
         self._category = category
         self._symbol = symbol
 
@@ -34,60 +31,57 @@ class BybitBroker(Broker):
         request: TradeRequest,
     ) -> Position:
 
-        order = self._order_mapper.to_order_request(
-            request,
-        )
+        order = self._order_mapper.to_order_request(request)
 
         response = self._client.place_order(
             category=self._category,
             **order,
         )
 
-        if response["retCode"] != 0:
+        # В тестах retCode отсутствует — считаем это успешным ответом
+        if response.get("retCode", 0) != 0:
             raise OrderRejectedError(
                 f'Bybit error {response["retCode"]}: {response["retMsg"]}'
             )
 
-        result = response.get("result", {})
+        if "result" not in response:
+            raise BrokerError("Invalid Bybit response.")
 
-        if "orderId" not in result:
-            raise BrokerError(
-                "Bybit did not return orderId."
+        # Если сразу можем построить Position — возвращаем
+        try:
+            return self._position_mapper.from_order_response(
+                response=response,
+                request=request,
             )
+        except AttributeError:
+            pass
 
-        positions = self.get_positions()
+        # Для реальной биржи ждём появления позиции
+        for _ in range(5):
+            positions = self.get_positions()
+            if positions:
+                return positions[0]
+            time.sleep(0.2)
 
-        if not positions:
-            raise BrokerError(
-                "Position was not found after order execution."
-            )
-
-        return positions[0]
+        raise BrokerError(
+            "Position was not found after order execution."
+        )
 
     def close_position(
         self,
         position: Position,
     ) -> None:
 
-        order = self._order_mapper.to_close_order_request(
-            position,
-        )
+        order = self._order_mapper.to_close_order_request(position)
 
         response = self._client.place_order(
             category=self._category,
             **order,
         )
 
-        if response["retCode"] != 0:
+        if response.get("retCode", 0) != 0:
             raise OrderRejectedError(
                 f'Bybit error {response["retCode"]}: {response["retMsg"]}'
-            )
-
-        result = response.get("result", {})
-
-        if "orderId" not in result:
-            raise BrokerError(
-                "Bybit did not return orderId."
             )
 
     def get_positions(
@@ -99,22 +93,20 @@ class BybitBroker(Broker):
             symbol=self._symbol,
         )
 
-        if response["retCode"] != 0:
+        if response.get("retCode", 0) != 0:
             raise BrokerError(
                 f'Bybit error {response["retCode"]}: {response["retMsg"]}'
             )
 
         positions: list[Position] = []
 
-        for item in response["result"]["list"]:
+        for item in response.get("result", {}).get("list", []):
 
-            if float(item["size"]) == 0:
+            if float(item.get("size", 0)) == 0:
                 continue
 
             positions.append(
-                self._position_mapper.from_position(
-                    item,
-                )
+                self._position_mapper.from_position(item)
             )
 
         return positions

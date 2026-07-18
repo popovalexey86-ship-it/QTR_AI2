@@ -10,13 +10,17 @@ class TradeRequest:
     Готовый запрос на открытие позиции.
     """
 
-    symbol: str
+    decision: Decision
+
+    entry: float
+    stop_loss: float
+    take_profit: float
+
+    volume: float
 
     setup: Setup
 
-    decision: Decision
-
-    volume: float
+    symbol: str = "BTCUSDT"
 
     def __post_init__(self) -> None:
         if not self.symbol:

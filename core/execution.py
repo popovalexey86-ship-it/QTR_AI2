@@ -18,5 +18,4 @@ class Execution:
         """
         Исполнить торговую заявку.
         """
-
         return self._broker.open_position(request)

@@ -17,22 +17,26 @@ class RiskManager:
         decision: Decision,
     ) -> TradeRequest:
 
+        # Пока объём позиции фиксированный.
+        volume = 0.01
+
         risk = abs(setup.entry - setup.stop_loss)
 
         if decision == Decision.BUY:
-            take_profit = setup.entry + risk * self._risk_reward
-
-        elif decision == Decision.SELL:
-            take_profit = setup.entry - risk * self._risk_reward
-
+            take_profit = (
+                setup.entry + risk * self._risk_reward
+            )
         else:
-            take_profit = setup.entry
+            take_profit = (
+                setup.entry - risk * self._risk_reward
+            )
 
         return TradeRequest(
+            symbol="BTCUSDT",
             decision=decision,
             entry=setup.entry,
             stop_loss=setup.stop_loss,
             take_profit=take_profit,
-            volume=0.0,
+            volume=volume,
             setup=setup,
         )
