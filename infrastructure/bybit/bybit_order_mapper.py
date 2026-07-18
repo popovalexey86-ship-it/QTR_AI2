@@ -22,8 +22,8 @@ class BybitOrderMapper:
             "orderType": "Market",
             "qty": str(request.volume),
             "timeInForce": "IOC",
-            "takeProfit": str(request.setup.take_profit),
-            "stopLoss": str(request.setup.stop_loss),
+            "takeProfit": str(request.take_profit),
+            "stopLoss": str(request.stop_loss),
         }
 
     @staticmethod

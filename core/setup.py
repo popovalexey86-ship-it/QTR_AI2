@@ -8,9 +8,6 @@ from core.trend import Trend
 class Setup:
     """
     Найденная торговая возможность.
-
-    Содержит все параметры торговой идеи, рассчитанные
-    на этапе анализа рынка.
     """
 
     index: int
@@ -20,4 +17,3 @@ class Setup:
 
     entry: float
     stop_loss: float
-    take_profit: float

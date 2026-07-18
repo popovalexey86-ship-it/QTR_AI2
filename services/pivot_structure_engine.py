@@ -1,3 +1,4 @@
+from core.market_structure import MarketStructure
 from core.structure_point import StructurePoint
 from core.structure_type import StructureType
 from core.swing import Swing
@@ -11,8 +12,8 @@ class PivotStructureEngine(StructureEngine):
     Builds market structure from confirmed swings.
     """
 
-    def build(self, swings: list[Swing]) -> list[StructurePoint]:
-        structure: list[StructurePoint] = []
+    def build(self, swings: list[Swing]) -> MarketStructure:
+        structure = MarketStructure()
 
         last_high: Swing | None = None
         last_low: Swing | None = None
@@ -21,7 +22,7 @@ class PivotStructureEngine(StructureEngine):
 
             if swing.type == SwingType.HIGH:
                 if last_high is not None:
-                    structure.append(
+                    structure.points.append(
                         StructurePoint(
                             swing=swing,
                             type=(
@@ -34,9 +35,9 @@ class PivotStructureEngine(StructureEngine):
 
                 last_high = swing
 
-            else:
+            elif swing.type == SwingType.LOW:
                 if last_low is not None:
-                    structure.append(
+                    structure.points.append(
                         StructurePoint(
                             swing=swing,
                             type=(

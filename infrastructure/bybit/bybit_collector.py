@@ -9,9 +9,9 @@ class BybitCollector:
     def __init__(
         self,
         client: BybitClient,
-        category: str,
-        symbol: str,
-        interval: str,
+        category: str = "linear",
+        symbol: str = "BTCUSDT",
+        interval: str = "1",
     ):
         self._client = client
         self._category = category
@@ -20,18 +20,25 @@ class BybitCollector:
 
     def collect(
         self,
+        category: str | None = None,
+        symbol: str | None = None,
+        interval: str | None = None,
         limit: int = 500,
     ) -> MarketData:
 
+        category = category or self._category
+        symbol = symbol or self._symbol
+        interval = interval or self._interval
+
         response = self._client.get_klines(
-            category=self._category,
-            symbol=self._symbol,
-            interval=self._interval,
+            category=category,
+            symbol=symbol,
+            interval=interval,
             limit=limit,
         )
 
         return BybitMapper.to_market_data(
             response=response,
-            symbol=self._symbol,
-            timeframe=self._interval,
+            symbol=symbol,
+            timeframe=interval,
         )

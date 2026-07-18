@@ -10,7 +10,7 @@ class Position:
     Открытая торговая позиция.
     """
 
-    symbol: str
+    ticket: int
 
     decision: Decision
 
@@ -23,3 +23,5 @@ class Position:
     volume: float
 
     opened_at: datetime
+
+    symbol: str = "BTCUSDT"
