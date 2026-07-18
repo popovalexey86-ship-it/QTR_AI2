@@ -14,36 +14,39 @@ class PivotStructureEngine(StructureEngine):
     def build(self, swings: list[Swing]) -> list[StructurePoint]:
         structure: list[StructurePoint] = []
 
-        if len(swings) < 2:
-            return structure
+        last_high: Swing | None = None
+        last_low: Swing | None = None
 
-        previous = swings[0]
+        for swing in swings:
 
-        for current in swings[1:]:
-            if current.type != previous.type:
-                previous = current
-                continue
+            if swing.type == SwingType.HIGH:
+                if last_high is not None:
+                    structure.append(
+                        StructurePoint(
+                            swing=swing,
+                            type=(
+                                StructureType.HH
+                                if swing.price > last_high.price
+                                else StructureType.LH
+                            ),
+                        )
+                    )
 
-            if current.type == SwingType.HIGH:
-                structure_type = (
-                    StructureType.HH
-                    if current.price > previous.price
-                    else StructureType.LH
-                )
+                last_high = swing
+
             else:
-                structure_type = (
-                    StructureType.HL
-                    if current.price > previous.price
-                    else StructureType.LL
-                )
+                if last_low is not None:
+                    structure.append(
+                        StructurePoint(
+                            swing=swing,
+                            type=(
+                                StructureType.HL
+                                if swing.price > last_low.price
+                                else StructureType.LL
+                            ),
+                        )
+                    )
 
-            structure.append(
-                StructurePoint(
-                    swing=current,
-                    type=structure_type,
-                )
-            )
-
-            previous = current
+                last_low = swing
 
         return structure
