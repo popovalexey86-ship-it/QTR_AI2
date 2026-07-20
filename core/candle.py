@@ -9,7 +9,6 @@ class Candle:
 
     Используется всеми модулями системы.
     """
-
     timestamp: datetime
 
     open: float
@@ -18,3 +17,6 @@ class Candle:
     close: float
 
     volume: float
+
+    # Index in the containing MarketData sequence. Standalone candles use 0.
+    index: int = 0

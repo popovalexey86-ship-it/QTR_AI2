@@ -47,3 +47,15 @@ class BybitClient:
             category=category,
             symbol=symbol,
         )
+
+    def get_closed_pnl(
+        self,
+        category: str,
+        symbol: str,
+        limit: int = 1,
+    ) -> dict:
+        return self._session.get_closed_pnl(
+            category=category,
+            symbol=symbol,
+            limit=limit,
+        )

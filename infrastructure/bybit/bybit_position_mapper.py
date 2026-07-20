@@ -14,7 +14,7 @@ class BybitPositionMapper:
     ) -> Position:
 
         return Position(
-            ticket=int(response["result"]["orderId"]),
+            ticket=response["result"]["orderId"],
             symbol=request.symbol,
             decision=request.decision,
             entry=request.entry,
@@ -34,7 +34,7 @@ class BybitPositionMapper:
         decision = Decision.BUY if side == "Buy" else Decision.SELL
 
         return Position(
-            ticket=int(position.get("positionIdx", 0)),
+            ticket=position["positionIdx"],
             symbol=position["symbol"],
             decision=decision,
             entry=float(position["avgPrice"]),

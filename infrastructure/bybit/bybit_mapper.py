@@ -7,9 +7,10 @@ from core.market_data import MarketData
 class BybitMapper:
 
     @staticmethod
-    def to_candle(raw: list[str]) -> Candle:
+    def to_candle(raw: list[str], index: int = 0) -> Candle:
 
         return Candle(
+            index=index,
             timestamp=datetime.fromtimestamp(
                 int(raw[0]) / 1000,
                 UTC,
@@ -28,7 +29,16 @@ class BybitMapper:
         timeframe: str,
     ) -> MarketData:
 
-        candles = [BybitMapper.to_candle(raw) for raw in response["result"]["list"]]
+        raw_candles = response["result"]["list"]
+
+        # Bybit возвращает свечи от новых к старым.
+        # Разворачиваем их в хронологический порядок.
+        raw_candles.reverse()
+
+        candles = [
+            BybitMapper.to_candle(raw, index)
+            for index, raw in enumerate(raw_candles)
+        ]
 
         return MarketData(
             symbol=symbol,
