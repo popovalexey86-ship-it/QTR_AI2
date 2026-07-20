@@ -1,3 +1,4 @@
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -10,18 +11,23 @@ from core.position_monitor import PositionMonitor
 from core.position import Position
 from core.trade_statistics import TradeStatistics
 from core.trade_journal import TradeJournal
+from core.trade import Trade
+from infrastructure.csv_trade_journal import CsvTradeJournal
 from engine.trading_engine import TradingEngine
 
 
-def test_bootstrap_creates_trading_engine_with_position_monitor():
-    container = SimpleNamespace(broker=Mock())
+def test_bootstrap_creates_trading_engine_with_position_monitor(tmp_path):
+    container = SimpleNamespace(
+        broker=Mock(),
+        config=SimpleNamespace(trade_journal_path=tmp_path / "trades.csv"),
+    )
 
     engine = create_trading_engine(container)
 
     assert isinstance(engine, TradingEngine)
     assert isinstance(engine._position_monitor, PositionMonitor)
     assert isinstance(engine._position_monitor._statistics, TradeStatistics)
-    assert isinstance(engine._position_monitor._journal, TradeJournal)
+    assert isinstance(engine._position_monitor._journal, CsvTradeJournal)
 
 
 def test_trading_cycle_updates_position_monitor_before_analysis():
@@ -82,3 +88,28 @@ def test_app_uses_safe_application_entrypoint(monkeypatch):
     app.main()
 
     run_application.assert_called_once_with(run_loop=False)
+
+
+def test_bootstrap_hydrates_statistics_from_csv_journal(tmp_path):
+    path = tmp_path / "trades.csv"
+    trade = Trade(
+        ticket="trade-1",
+        symbol="BTCUSDT",
+        decision=Decision.BUY,
+        entry=100.0,
+        exit=105.0,
+        volume=0.01,
+        pnl=5.0,
+        fees=0.1,
+        opened_at=datetime(2025, 1, 1),
+        closed_at=datetime(2025, 1, 2),
+    )
+    CsvTradeJournal(path).add_trade(trade)
+    container = SimpleNamespace(
+        broker=Mock(),
+        config=SimpleNamespace(trade_journal_path=path),
+    )
+
+    engine = create_trading_engine(container)
+
+    assert engine._position_monitor._statistics.trades == (trade,)

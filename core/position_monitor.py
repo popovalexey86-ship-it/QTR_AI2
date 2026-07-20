@@ -1,7 +1,7 @@
 from core.execution import Execution
 from core.logger import logger
 from core.position import Position
-from core.trade_journal import TradeJournal
+from core.trade_journal import TradeJournalPort, TradeJournalWriteError
 from core.trade_statistics import TradeStatistics
 
 
@@ -10,7 +10,7 @@ class PositionMonitor:
         self,
         execution: Execution,
         statistics: TradeStatistics,
-        journal: TradeJournal,
+        journal: TradeJournalPort,
     ) -> None:
         self._execution = execution
         self._statistics = statistics
@@ -55,9 +55,18 @@ class PositionMonitor:
         if trade.ticket == self._last_closed_trade_ticket:
             return
 
-        self._statistics.add_trade(trade)
-        self._journal.add_trade(trade)
+        try:
+            added = self._journal.add_trade(trade)
+        except TradeJournalWriteError:
+            logger.exception("Failed to persist closed trade. Ticket=%s", trade.ticket)
+            raise
+
         self._last_closed_trade_ticket = trade.ticket
+
+        if not added:
+            return
+
+        self._statistics.add_trade(trade)
 
         logger.info(
             "Position closed | ticket=%s symbol=%s decision=%s entry=%s "

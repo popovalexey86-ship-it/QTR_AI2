@@ -20,6 +20,7 @@ def test_trade_journal_adds_trade():
     )
     journal = TradeJournal()
 
-    journal.add_trade(trade)
+    assert journal.add_trade(trade) is True
+    assert journal.add_trade(trade) is False
 
     assert journal.trades == (trade,)
