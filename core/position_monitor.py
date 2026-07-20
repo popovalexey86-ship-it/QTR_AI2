@@ -1,6 +1,7 @@
 from core.execution import Execution
 from core.logger import logger
 from core.position import Position
+from core.trade_journal import TradeJournal
 from core.trade_statistics import TradeStatistics
 
 
@@ -9,9 +10,11 @@ class PositionMonitor:
         self,
         execution: Execution,
         statistics: TradeStatistics,
+        journal: TradeJournal,
     ) -> None:
         self._execution = execution
         self._statistics = statistics
+        self._journal = journal
 
         self._position: Position | None = None
         self._previous_position: Position | None = None
@@ -53,6 +56,7 @@ class PositionMonitor:
             return
 
         self._statistics.add_trade(trade)
+        self._journal.add_trade(trade)
         self._last_closed_trade_ticket = trade.ticket
 
         logger.info(

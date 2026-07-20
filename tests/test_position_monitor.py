@@ -5,6 +5,7 @@ from core.decision import Decision
 from core.position import Position
 from core.position_monitor import PositionMonitor
 from core.trade import Trade
+from core.trade_journal import TradeJournal
 from core.trade_statistics import TradeStatistics
 
 
@@ -42,7 +43,7 @@ def test_logs_new_open_position_once(monkeypatch):
     logger = Mock()
     monkeypatch.setattr("core.position_monitor.logger", logger)
 
-    monitor = PositionMonitor(execution, TradeStatistics())
+    monitor = PositionMonitor(execution, TradeStatistics(), TradeJournal())
     monitor.update()
     monitor.update()
 
@@ -58,7 +59,8 @@ def test_open_to_closed_adds_trade_and_preserves_previous_position():
     execution.get_open_position.side_effect = [position, None]
     execution.get_last_closed_trade.return_value = trade
     statistics = TradeStatistics()
-    monitor = PositionMonitor(execution, statistics)
+    journal = TradeJournal()
+    monitor = PositionMonitor(execution, statistics, journal)
 
     monitor.update()
     monitor.update()
@@ -66,6 +68,7 @@ def test_open_to_closed_adds_trade_and_preserves_previous_position():
     assert monitor.position is None
     assert monitor.previous_position is position
     assert statistics.trades == (trade,)
+    assert journal.trades == (trade,)
     assert execution.get_last_closed_trade.call_count == 1
 
 
@@ -74,7 +77,7 @@ def test_repeated_update_after_close_does_not_lookup_or_add_trade_again():
     execution.get_open_position.side_effect = [make_position(), None, None]
     execution.get_last_closed_trade.return_value = make_trade()
     statistics = TradeStatistics()
-    monitor = PositionMonitor(execution, statistics)
+    monitor = PositionMonitor(execution, statistics, TradeJournal())
 
     monitor.update()
     monitor.update()
@@ -94,7 +97,7 @@ def test_duplicate_closed_trade_ticket_is_not_added_twice():
     ]
     execution.get_last_closed_trade.return_value = make_trade("trade-1")
     statistics = TradeStatistics()
-    monitor = PositionMonitor(execution, statistics)
+    monitor = PositionMonitor(execution, statistics, TradeJournal())
 
     for _ in range(4):
         monitor.update()
@@ -110,7 +113,7 @@ def test_missing_closed_trade_logs_warning_without_adding_statistics(monkeypatch
     logger = Mock()
     monkeypatch.setattr("core.position_monitor.logger", logger)
     statistics = TradeStatistics()
-    monitor = PositionMonitor(execution, statistics)
+    monitor = PositionMonitor(execution, statistics, TradeJournal())
 
     monitor.update()
     monitor.update()

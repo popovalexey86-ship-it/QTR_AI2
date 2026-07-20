@@ -13,6 +13,7 @@ from core.setup_engine import SetupEngine
 from core.decision_engine import DecisionEngine
 
 from core.execution import Execution
+from core.trade_journal import TradeJournal
 from core.position_monitor import PositionMonitor
 from core.risk_manager import RiskManager
 from core.trade_statistics import TradeStatistics
@@ -64,9 +65,11 @@ def create_trading_engine(
         broker=container.broker,
     )
     statistics = TradeStatistics()
+    journal = TradeJournal()
     position_monitor = PositionMonitor(
         execution=execution,
         statistics=statistics,
+        journal=journal,
     )
 
     # Trading Engine
