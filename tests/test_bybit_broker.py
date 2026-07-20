@@ -47,7 +47,7 @@ def test_open_position():
     position = broker.open_position(request)
 
     assert isinstance(position, Position)
-    assert position.ticket == 123456
+    assert position.ticket == "123456"
     assert position.decision == Decision.BUY
     assert position.entry == 62000
     assert position.volume == 0.01

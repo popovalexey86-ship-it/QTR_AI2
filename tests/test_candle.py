@@ -19,6 +19,7 @@ def test_create_candle():
     assert candle.low == 95.0
     assert candle.close == 105.0
     assert candle.volume == 2500.0
+    assert candle.index == 0
 
 
 def test_candle_is_immutable():

@@ -3,8 +3,9 @@ import time
 from core.broker import Broker
 from core.exceptions import BrokerError, OrderRejectedError
 from core.position import Position
+from core.trade import Trade
 from core.trade_request import TradeRequest
-
+from infrastructure.bybit.bybit_trade_mapper import BybitTradeMapper
 from infrastructure.bybit.bybit_client import BybitClient
 from infrastructure.bybit.bybit_order_mapper import BybitOrderMapper
 from infrastructure.bybit.bybit_position_mapper import BybitPositionMapper
@@ -38,7 +39,6 @@ class BybitBroker(Broker):
             **order,
         )
 
-        # В тестах retCode отсутствует — считаем это успешным ответом
         if response.get("retCode", 0) != 0:
             raise OrderRejectedError(
                 f'Bybit error {response["retCode"]}: {response["retMsg"]}'
@@ -47,7 +47,6 @@ class BybitBroker(Broker):
         if "result" not in response:
             raise BrokerError("Invalid Bybit response.")
 
-        # Если сразу можем построить Position — возвращаем
         try:
             return self._position_mapper.from_order_response(
                 response=response,
@@ -56,7 +55,6 @@ class BybitBroker(Broker):
         except AttributeError:
             pass
 
-        # Для реальной биржи ждём появления позиции
         for _ in range(5):
             positions = self.get_positions()
             if positions:
@@ -103,6 +101,41 @@ class BybitBroker(Broker):
             if float(item.get("size", 0)) == 0:
                 continue
 
-            positions.append(self._position_mapper.from_position(item))
+            positions.append(
+                self._position_mapper.from_position(item)
+            )
 
         return positions
+
+    def get_open_position(
+        self,
+    ) -> Position | None:
+
+        positions = self.get_positions()
+
+        if not positions:
+            return None
+
+        return positions[0]
+
+    def get_last_closed_trade(
+        self,
+    ) -> Trade | None:
+
+       response = self._client.get_closed_pnl(
+           category=self._category,
+           symbol=self._symbol,
+           limit=1,
+       )
+
+       if response.get("retCode", 0) != 0:
+           raise BrokerError(
+               f'Bybit error {response["retCode"]}: {response["retMsg"]}'
+           )
+
+       trades = response.get("result", {}).get("list", [])
+
+       if not trades:
+           return None
+
+       return BybitTradeMapper.from_closed_pnl(trades[0])

@@ -39,7 +39,7 @@ def test_from_order_response():
         request=request,
     )
 
-    assert position.ticket == 123456
+    assert position.ticket == "123456"
     assert position.decision == Decision.BUY
     assert position.entry == 62000
     assert position.stop_loss == 61500
