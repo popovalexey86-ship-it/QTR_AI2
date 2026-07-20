@@ -9,6 +9,7 @@ from core.decision import Decision
 from core.position_monitor import PositionMonitor
 from core.position import Position
 from core.trade_statistics import TradeStatistics
+from core.trade_journal import TradeJournal
 from engine.trading_engine import TradingEngine
 
 
@@ -20,6 +21,7 @@ def test_bootstrap_creates_trading_engine_with_position_monitor():
     assert isinstance(engine, TradingEngine)
     assert isinstance(engine._position_monitor, PositionMonitor)
     assert isinstance(engine._position_monitor._statistics, TradeStatistics)
+    assert isinstance(engine._position_monitor._journal, TradeJournal)
 
 
 def test_trading_cycle_updates_position_monitor_before_analysis():
@@ -54,7 +56,7 @@ def test_position_monitor_update_accepts_domain_position():
     execution = Mock()
     execution.get_open_position.return_value = position
 
-    monitor = PositionMonitor(execution, TradeStatistics())
+    monitor = PositionMonitor(execution, TradeStatistics(), TradeJournal())
 
     monitor.update()
 

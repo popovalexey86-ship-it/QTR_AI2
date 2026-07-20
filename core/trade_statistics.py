@@ -46,3 +46,35 @@ class TradeStatistics:
     @property
     def net_pnl(self) -> float:
         return self.total_pnl
+
+    @property
+    def win_rate(self) -> float:
+        if self.total_trades == 0:
+            return 0.0
+        return self.wins / self.total_trades
+
+    @property
+    def average_win(self) -> float:
+        if self.wins == 0:
+            return 0.0
+        return sum(trade.pnl for trade in self._trades if trade.pnl > 0) / self.wins
+
+    @property
+    def average_loss(self) -> float:
+        if self.losses == 0:
+            return 0.0
+        return sum(trade.pnl for trade in self._trades if trade.pnl < 0) / self.losses
+
+    @property
+    def profit_factor(self) -> float:
+        gross_loss = -sum(trade.pnl for trade in self._trades if trade.pnl < 0)
+        if gross_loss == 0:
+            return 0.0
+        gross_profit = sum(trade.pnl for trade in self._trades if trade.pnl > 0)
+        return gross_profit / gross_loss
+
+    @property
+    def expectancy(self) -> float:
+        if self.total_trades == 0:
+            return 0.0
+        return self.total_pnl / self.total_trades

@@ -38,3 +38,18 @@ def test_trade_statistics_calculates_outcomes_and_pnl():
     assert statistics.total_pnl == 6.0
     assert statistics.total_fees == 0.6
     assert statistics.net_pnl == 6.0
+    assert statistics.win_rate == 1 / 3
+    assert statistics.average_win == 10.0
+    assert statistics.average_loss == -4.0
+    assert statistics.profit_factor == 2.5
+    assert statistics.expectancy == 2.0
+
+
+def test_trade_statistics_returns_safe_values_without_trades():
+    statistics = TradeStatistics()
+
+    assert statistics.win_rate == 0.0
+    assert statistics.average_win == 0.0
+    assert statistics.average_loss == 0.0
+    assert statistics.profit_factor == 0.0
+    assert statistics.expectancy == 0.0
