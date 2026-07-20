@@ -13,13 +13,20 @@ from core.trade_statistics import TradeStatistics
 from core.trade_journal import TradeJournal
 from core.trade import Trade
 from infrastructure.csv_trade_journal import CsvTradeJournal
+from infrastructure.null_notifier import NullNotifier
+from infrastructure.telegram_notifier import TelegramNotifier
 from engine.trading_engine import TradingEngine
 
 
 def test_bootstrap_creates_trading_engine_with_position_monitor(tmp_path):
     container = SimpleNamespace(
         broker=Mock(),
-        config=SimpleNamespace(trade_journal_path=tmp_path / "trades.csv"),
+        config=SimpleNamespace(
+            trade_journal_path=tmp_path / "trades.csv",
+            telegram_enabled=False,
+            telegram_bot_token=None,
+            telegram_chat_id=None,
+        ),
     )
 
     engine = create_trading_engine(container)
@@ -28,6 +35,7 @@ def test_bootstrap_creates_trading_engine_with_position_monitor(tmp_path):
     assert isinstance(engine._position_monitor, PositionMonitor)
     assert isinstance(engine._position_monitor._statistics, TradeStatistics)
     assert isinstance(engine._position_monitor._journal, CsvTradeJournal)
+    assert isinstance(engine._position_monitor._notifier, NullNotifier)
 
 
 def test_trading_cycle_updates_position_monitor_before_analysis():
@@ -62,7 +70,9 @@ def test_position_monitor_update_accepts_domain_position():
     execution = Mock()
     execution.get_open_position.return_value = position
 
-    monitor = PositionMonitor(execution, TradeStatistics(), TradeJournal())
+    monitor = PositionMonitor(
+        execution, TradeStatistics(), TradeJournal(), NullNotifier()
+    )
 
     monitor.update()
 
@@ -107,9 +117,30 @@ def test_bootstrap_hydrates_statistics_from_csv_journal(tmp_path):
     CsvTradeJournal(path).add_trade(trade)
     container = SimpleNamespace(
         broker=Mock(),
-        config=SimpleNamespace(trade_journal_path=path),
+        config=SimpleNamespace(
+            trade_journal_path=path,
+            telegram_enabled=False,
+            telegram_bot_token=None,
+            telegram_chat_id=None,
+        ),
     )
 
     engine = create_trading_engine(container)
 
     assert engine._position_monitor._statistics.trades == (trade,)
+
+
+def test_bootstrap_selects_telegram_notifier_without_sending_network_request(tmp_path):
+    container = SimpleNamespace(
+        broker=Mock(),
+        config=SimpleNamespace(
+            trade_journal_path=tmp_path / "trades.csv",
+            telegram_enabled=True,
+            telegram_bot_token="test-token",
+            telegram_chat_id="test-chat",
+        ),
+    )
+
+    engine = create_trading_engine(container)
+
+    assert isinstance(engine._position_monitor._notifier, TelegramNotifier)

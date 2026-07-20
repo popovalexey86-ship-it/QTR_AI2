@@ -1,5 +1,6 @@
 from core.execution import Execution
 from core.logger import logger
+from core.notification import NotificationError, NotificationPort
 from core.position import Position
 from core.trade_journal import TradeJournalPort, TradeJournalWriteError
 from core.trade_statistics import TradeStatistics
@@ -11,10 +12,12 @@ class PositionMonitor:
         execution: Execution,
         statistics: TradeStatistics,
         journal: TradeJournalPort,
+        notifier: NotificationPort,
     ) -> None:
         self._execution = execution
         self._statistics = statistics
         self._journal = journal
+        self._notifier = notifier
 
         self._position: Position | None = None
         self._previous_position: Position | None = None
@@ -33,6 +36,8 @@ class PositionMonitor:
             return
 
         if position.ticket != self._last_open_position_ticket:
+            self._last_open_position_ticket = position.ticket
+
             logger.info(
                 "Position opened | ticket=%s symbol=%s decision=%s entry=%s",
                 position.ticket,
@@ -40,7 +45,15 @@ class PositionMonitor:
                 position.decision.name,
                 position.entry,
             )
-            self._last_open_position_ticket = position.ticket
+
+            try:
+                self._notifier.position_opened(position)
+            except NotificationError as error:
+                logger.error(
+                    "Position-opened notification failed. Ticket=%s Error=%s",
+                    position.ticket,
+                    error,
+                )
 
         self._previous_position = self._position
         self._position = position
@@ -80,6 +93,15 @@ class PositionMonitor:
             trade.pnl,
             trade.fees,
         )
+
+        try:
+            self._notifier.trade_closed(trade, self._statistics)
+        except NotificationError as error:
+            logger.error(
+                "Trade-closed notification failed. Ticket=%s Error=%s",
+                trade.ticket,
+                error,
+            )
 
     @property
     def position(self) -> Position | None:

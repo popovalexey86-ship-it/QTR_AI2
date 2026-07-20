@@ -9,6 +9,7 @@ from core.position_monitor import PositionMonitor
 from core.trade import Trade
 from core.trade_journal import TradeJournal, TradeJournalWriteError
 from core.trade_statistics import TradeStatistics
+from infrastructure.null_notifier import NullNotifier
 
 
 def make_position(ticket: str = "position-1") -> Position:
@@ -45,13 +46,15 @@ def test_logs_new_open_position_once(monkeypatch):
     logger = Mock()
     monkeypatch.setattr("core.position_monitor.logger", logger)
 
-    monitor = PositionMonitor(execution, TradeStatistics(), TradeJournal())
+    notifier = Mock()
+    monitor = PositionMonitor(execution, TradeStatistics(), TradeJournal(), notifier)
     monitor.update()
     monitor.update()
 
     assert monitor.position is position
     assert monitor.previous_position is position
     logger.info.assert_called_once()
+    notifier.position_opened.assert_called_once_with(position)
 
 
 def test_open_to_closed_adds_trade_and_preserves_previous_position():
@@ -62,7 +65,13 @@ def test_open_to_closed_adds_trade_and_preserves_previous_position():
     execution.get_last_closed_trade.return_value = trade
     statistics = TradeStatistics()
     journal = TradeJournal()
-    monitor = PositionMonitor(execution, statistics, journal)
+    notifier = Mock()
+
+    def assert_statistics_updated(closed_trade, current_statistics):
+        assert current_statistics.trades == (closed_trade,)
+
+    notifier.trade_closed.side_effect = assert_statistics_updated
+    monitor = PositionMonitor(execution, statistics, journal, notifier)
 
     monitor.update()
     monitor.update()
@@ -72,6 +81,7 @@ def test_open_to_closed_adds_trade_and_preserves_previous_position():
     assert statistics.trades == (trade,)
     assert journal.trades == (trade,)
     assert execution.get_last_closed_trade.call_count == 1
+    notifier.trade_closed.assert_called_once_with(trade, statistics)
 
 
 def test_repeated_update_after_close_does_not_lookup_or_add_trade_again():
@@ -79,7 +89,7 @@ def test_repeated_update_after_close_does_not_lookup_or_add_trade_again():
     execution.get_open_position.side_effect = [make_position(), None, None]
     execution.get_last_closed_trade.return_value = make_trade()
     statistics = TradeStatistics()
-    monitor = PositionMonitor(execution, statistics, TradeJournal())
+    monitor = PositionMonitor(execution, statistics, TradeJournal(), NullNotifier())
 
     monitor.update()
     monitor.update()
@@ -99,13 +109,15 @@ def test_duplicate_closed_trade_ticket_is_not_added_twice():
     ]
     execution.get_last_closed_trade.return_value = make_trade("trade-1")
     statistics = TradeStatistics()
-    monitor = PositionMonitor(execution, statistics, TradeJournal())
+    notifier = Mock()
+    monitor = PositionMonitor(execution, statistics, TradeJournal(), notifier)
 
     for _ in range(4):
         monitor.update()
 
     assert statistics.total_trades == 1
     assert execution.get_last_closed_trade.call_count == 2
+    notifier.trade_closed.assert_called_once()
 
 
 def test_missing_closed_trade_logs_warning_without_adding_statistics(monkeypatch):
@@ -115,7 +127,7 @@ def test_missing_closed_trade_logs_warning_without_adding_statistics(monkeypatch
     logger = Mock()
     monkeypatch.setattr("core.position_monitor.logger", logger)
     statistics = TradeStatistics()
-    monitor = PositionMonitor(execution, statistics, TradeJournal())
+    monitor = PositionMonitor(execution, statistics, TradeJournal(), NullNotifier())
 
     monitor.update()
     monitor.update()
@@ -134,13 +146,15 @@ def test_existing_journal_trade_is_not_added_or_logged_again(monkeypatch):
     statistics = TradeStatistics()
     logger = Mock()
     monkeypatch.setattr("core.position_monitor.logger", logger)
-    monitor = PositionMonitor(execution, statistics, journal)
+    notifier = Mock()
+    monitor = PositionMonitor(execution, statistics, journal, notifier)
 
     monitor.update()
     monitor.update()
 
     assert statistics.trades == ()
     assert logger.info.call_count == 1
+    notifier.trade_closed.assert_not_called()
 
 
 def test_journal_error_does_not_add_trade_to_statistics():
@@ -156,7 +170,7 @@ def test_journal_error_does_not_add_trade_to_statistics():
     execution.get_open_position.side_effect = [make_position(), None]
     execution.get_last_closed_trade.return_value = make_trade()
     statistics = TradeStatistics()
-    monitor = PositionMonitor(execution, statistics, FailingJournal())
+    monitor = PositionMonitor(execution, statistics, FailingJournal(), NullNotifier())
 
     monitor.update()
 
@@ -185,7 +199,7 @@ def test_monitor_retries_trade_after_journal_recovers():
     execution.get_last_closed_trade.return_value = trade
     statistics = TradeStatistics()
     journal = RecoveringJournal()
-    monitor = PositionMonitor(execution, statistics, journal)
+    monitor = PositionMonitor(execution, statistics, journal, NullNotifier())
 
     monitor.update()
 
@@ -208,7 +222,7 @@ def test_unexpected_runtime_error_is_not_logged_as_journal_write_error(monkeypat
     statistics = TradeStatistics()
     logger = Mock()
     monkeypatch.setattr("core.position_monitor.logger", logger)
-    monitor = PositionMonitor(execution, statistics, journal)
+    monitor = PositionMonitor(execution, statistics, journal, NullNotifier())
 
     monitor.update()
 
@@ -218,3 +232,57 @@ def test_unexpected_runtime_error_is_not_logged_as_journal_write_error(monkeypat
     assert statistics.trades == ()
     assert monitor._last_closed_trade_ticket is None
     logger.exception.assert_not_called()
+
+
+def test_notification_error_on_open_does_not_break_monitor(monkeypatch):
+    from core.notification import NotificationError
+
+    execution = Mock()
+    position = make_position()
+    execution.get_open_position.side_effect = [position, position]
+    notifier = Mock()
+    notifier.position_opened.side_effect = NotificationError("delivery failed")
+    logger = Mock()
+    monkeypatch.setattr("core.position_monitor.logger", logger)
+    monitor = PositionMonitor(execution, TradeStatistics(), TradeJournal(), notifier)
+
+    monitor.update()
+    monitor.update()
+
+    assert monitor.position is position
+    logger.error.assert_called_once()
+    notifier.position_opened.assert_called_once_with(position)
+
+
+def test_notification_error_on_close_keeps_journal_and_statistics(monkeypatch):
+    from core.notification import NotificationError
+
+    execution = Mock()
+    trade = make_trade()
+    execution.get_open_position.side_effect = [make_position(), None]
+    execution.get_last_closed_trade.return_value = trade
+    statistics = TradeStatistics()
+    journal = TradeJournal()
+    notifier = Mock()
+    notifier.trade_closed.side_effect = NotificationError("delivery failed")
+    logger = Mock()
+    monkeypatch.setattr("core.position_monitor.logger", logger)
+    monitor = PositionMonitor(execution, statistics, journal, notifier)
+
+    monitor.update()
+    monitor.update()
+
+    assert journal.trades == (trade,)
+    assert statistics.trades == (trade,)
+    logger.error.assert_called_once()
+
+
+def test_unexpected_notifier_error_is_not_masked():
+    execution = Mock()
+    execution.get_open_position.return_value = make_position()
+    notifier = Mock()
+    notifier.position_opened.side_effect = RuntimeError("programming error")
+    monitor = PositionMonitor(execution, TradeStatistics(), TradeJournal(), notifier)
+
+    with pytest.raises(RuntimeError, match="programming error"):
+        monitor.update()
