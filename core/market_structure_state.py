@@ -25,3 +25,9 @@ class MarketStructureState:
 
     last_bos: BOS | None = None
     last_choch: CHOCH | None = None
+
+    last_broken_hh: Structure | None = None
+    last_broken_ll: Structure | None = None
+
+    last_broken_hl: Structure | None = None
+    last_broken_lh: Structure | None = None

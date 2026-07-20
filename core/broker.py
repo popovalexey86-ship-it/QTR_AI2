@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-
+from core.trade import Trade
 from core.position import Position
 from core.trade_request import TradeRequest
 
@@ -22,3 +22,13 @@ class Broker(ABC):
     def get_positions(
         self,
     ) -> list[Position]: ...
+
+    @abstractmethod
+    def get_open_position(
+        self,
+    )  -> Position | None: ...
+
+    @abstractmethod
+    def get_last_closed_trade(
+        self,
+    ) -> Trade | None:...

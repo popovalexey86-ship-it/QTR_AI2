@@ -10,7 +10,7 @@ class Position:
     Открытая торговая позиция.
     """
 
-    ticket: int
+    ticket: str
 
     decision: Decision
 

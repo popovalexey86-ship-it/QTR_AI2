@@ -5,6 +5,7 @@ from core.decision import Decision
 from core.execution import Execution
 from core.position import Position
 from core.setup import Setup
+from core.trade import Trade
 from core.trade_request import TradeRequest
 from core.trend import Trend
 
@@ -38,7 +39,7 @@ class FakeBroker(Broker):
     ) -> Position:
 
         return Position(
-            ticket=1,
+            ticket="1",
             decision=request.decision,
             entry=request.entry,
             stop_loss=request.stop_loss,
@@ -49,7 +50,7 @@ class FakeBroker(Broker):
 
     def close_position(
         self,
-        ticket: int,
+        position: Position,
     ) -> None:
         pass
 
@@ -57,6 +58,12 @@ class FakeBroker(Broker):
         self,
     ) -> list[Position]:
         return []
+
+    def get_open_position(self) -> Position | None:
+        return None
+
+    def get_last_closed_trade(self) -> Trade | None:
+        return None
 
 
 def test_execute_trade_request():
@@ -73,7 +80,7 @@ def test_execute_trade_request():
 
     assert isinstance(position, Position)
 
-    assert position.ticket == 1
+    assert position.ticket == "1"
     assert position.decision == Decision.BUY
     assert position.entry == 100.0
     assert position.stop_loss == 95.0

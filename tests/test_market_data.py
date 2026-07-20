@@ -11,15 +11,6 @@ def test_to_market_data():
         "result": {
             "list": [
                 [
-                    "1721217600000",
-                    "118000",
-                    "118200",
-                    "117900",
-                    "118100",
-                    "125.37",
-                    "14700000",
-                ],
-                [
                     "1721217660000",
                     "118100",
                     "118300",
@@ -27,6 +18,15 @@ def test_to_market_data():
                     "118250",
                     "98.15",
                     "11600000",
+                ],
+                [
+                    "1721217600000",
+                    "118000",
+                    "118200",
+                    "117900",
+                    "118100",
+                    "125.37",
+                    "14700000",
                 ],
             ]
         }
@@ -48,6 +48,7 @@ def test_to_market_data():
     assert len(market_data.candles) == 2
 
     assert market_data.candles[0] == Candle(
+        index=0,
         timestamp=datetime.fromtimestamp(
             1721217600,
             UTC,
@@ -60,6 +61,7 @@ def test_to_market_data():
     )
 
     assert market_data.candles[1] == Candle(
+        index=1,
         timestamp=datetime.fromtimestamp(
             1721217660,
             UTC,
