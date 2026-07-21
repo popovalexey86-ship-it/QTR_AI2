@@ -68,6 +68,7 @@ ALLOWED_TRANSITIONS = {
     PendingEntryStatus.SUBMITTED: {
         PendingEntryStatus.WORKING,
         PendingEntryStatus.PARTIALLY_FILLED,
+        PendingEntryStatus.CANCEL_REQUESTED,
         PendingEntryStatus.FILLED,
         PendingEntryStatus.CANCELLED,
         PendingEntryStatus.REJECTED,
@@ -114,7 +115,6 @@ def test_all_approved_status_transitions_are_allowed(
 @pytest.mark.parametrize(
     ("current", "target"),
     [
-        (PendingEntryStatus.SUBMITTED, PendingEntryStatus.CANCEL_REQUESTED),
         (PendingEntryStatus.WORKING, PendingEntryStatus.SUBMITTED),
         (PendingEntryStatus.CANCEL_REQUESTED, PendingEntryStatus.WORKING),
         (PendingEntryStatus.SUBMITTED, PendingEntryStatus.EXPIRED),
@@ -143,6 +143,19 @@ def test_expired_requires_confirmed_ttl_cancellation_transition() -> None:
                 current,
                 PendingEntryStatus.EXPIRED,
             )
+
+
+def test_submitted_can_request_asynchronous_live_cancellation() -> None:
+    validate_pending_entry_transition(
+        PendingEntryStatus.SUBMITTED,
+        PendingEntryStatus.CANCEL_REQUESTED,
+    )
+
+    with pytest.raises(InvalidPendingEntryTransition):
+        validate_pending_entry_transition(
+            PendingEntryStatus.SUBMITTED,
+            PendingEntryStatus.EXPIRED,
+        )
 
 
 @pytest.mark.parametrize(

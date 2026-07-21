@@ -86,3 +86,119 @@ def test_disabled_telegram_allows_missing_credentials(tmp_path):
     )
 
     assert config.telegram_enabled is False
+
+
+def test_pending_runtime_defaults(monkeypatch):
+    monkeypatch.setattr("infrastructure.config.load_dotenv", lambda: None)
+    monkeypatch.delenv("BYBIT_PENDING_ENTRY_STATE_PATH", raising=False)
+    monkeypatch.delenv("PENDING_ENTRY_TTL_CANDLES", raising=False)
+
+    config = Config.load()
+
+    assert config.bybit_pending_entry_state_path == Path(
+        "data/bybit_pending_entry.json"
+    )
+    assert config.pending_entry_ttl_candles == 4
+
+
+def test_pending_runtime_environment_overrides(monkeypatch, tmp_path):
+    state_path = tmp_path / "pending.json"
+    monkeypatch.setenv("BYBIT_PENDING_ENTRY_STATE_PATH", str(state_path))
+    monkeypatch.setenv("PENDING_ENTRY_TTL_CANDLES", "7")
+
+    config = Config.load()
+
+    assert config.bybit_pending_entry_state_path == state_path
+    assert config.pending_entry_ttl_candles == 7
+
+
+@pytest.mark.parametrize("value", ["", "0", "-1", "abc", "1.5"])
+def test_invalid_pending_ttl_environment_fails_safely(monkeypatch, value):
+    monkeypatch.setenv("PENDING_ENTRY_TTL_CANDLES", value)
+
+    with pytest.raises(ValueError, match="positive integer") as error:
+        Config.load()
+
+    assert "BYBIT_API" not in str(error.value)
+
+
+def test_empty_pending_state_path_environment_is_rejected(monkeypatch):
+    monkeypatch.setenv("BYBIT_PENDING_ENTRY_STATE_PATH", "   ")
+
+    with pytest.raises(ValueError, match="path cannot be empty"):
+        Config.load()
+
+
+def test_config_repr_excludes_bybit_credentials(tmp_path):
+    config = Config(
+        bybit_api_key="sensitive-key",
+        bybit_api_secret="sensitive-secret",
+        bybit_testnet=True,
+        trade_journal_path=tmp_path / "trades.csv",
+    )
+
+    assert "sensitive-key" not in repr(config)
+    assert "sensitive-secret" not in repr(config)
+
+
+def test_trade_parameter_defaults(monkeypatch):
+    monkeypatch.setattr("infrastructure.config.load_dotenv", lambda: None)
+    for name in ("TRADE_SYMBOL", "TRADE_INTERVAL", "TRADE_VOLUME"):
+        monkeypatch.delenv(name, raising=False)
+
+    config = Config.load()
+
+    assert config.trade_symbol == "BTCUSDT"
+    assert config.trade_interval == "15"
+    assert config.trade_volume == 0.01
+
+
+def test_trade_parameter_environment_overrides(monkeypatch):
+    monkeypatch.setenv("TRADE_SYMBOL", " ethusdt ")
+    monkeypatch.setenv("TRADE_INTERVAL", "5")
+    monkeypatch.setenv("TRADE_VOLUME", "0.25")
+
+    config = Config.load()
+
+    assert config.trade_symbol == "ETHUSDT"
+    assert config.trade_interval == "5"
+    assert config.trade_volume == 0.25
+
+
+@pytest.mark.parametrize("symbol", ["", "   ", "BTC/USDT", "БTCUSDT"])
+def test_invalid_trade_symbol_is_rejected(tmp_path, symbol):
+    with pytest.raises(ValueError, match="ASCII-safe"):
+        Config(
+            bybit_api_key="key",
+            bybit_api_secret="secret",
+            bybit_testnet=True,
+            trade_journal_path=tmp_path / "trades.csv",
+            trade_symbol=symbol,
+        )
+
+
+@pytest.mark.parametrize("interval", ["", "0", "-1", "D", "15m"])
+def test_invalid_trade_interval_is_rejected(tmp_path, interval):
+    with pytest.raises(ValueError, match="numeric-minute"):
+        Config(
+            bybit_api_key="key",
+            bybit_api_secret="secret",
+            bybit_testnet=True,
+            trade_journal_path=tmp_path / "trades.csv",
+            trade_interval=interval,
+        )
+
+
+@pytest.mark.parametrize(
+    "volume",
+    [0.0, -1.0, float("nan"), float("inf"), True],
+)
+def test_invalid_trade_volume_is_rejected(tmp_path, volume):
+    with pytest.raises(ValueError, match="finite and positive"):
+        Config(
+            bybit_api_key="key",
+            bybit_api_secret="secret",
+            bybit_testnet=True,
+            trade_journal_path=tmp_path / "trades.csv",
+            trade_volume=volume,
+        )

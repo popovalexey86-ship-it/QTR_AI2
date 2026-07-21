@@ -34,6 +34,7 @@ _ALLOWED_TRANSITIONS: dict[
         {
             PendingEntryStatus.WORKING,
             PendingEntryStatus.PARTIALLY_FILLED,
+            PendingEntryStatus.CANCEL_REQUESTED,
             PendingEntryStatus.FILLED,
             PendingEntryStatus.CANCELLED,
             PendingEntryStatus.REJECTED,
@@ -145,6 +146,7 @@ class PendingEntry:
     completed_candles_active: int = 0
     filled_volume: float = 0.0
     average_fill_price: float | None = None
+    expiry_requested: bool = False
 
     def __post_init__(self) -> None:
         _validate_non_empty(self.order_link_id, "Pending entry order link ID")
@@ -160,6 +162,8 @@ class PendingEntry:
             raise ValueError(
                 "Completed active candle count cannot be negative."
             )
+        if not isinstance(self.expiry_requested, bool):
+            raise ValueError("Pending entry expiry marker must be boolean.")
 
         validate_entry_fill_fields(
             status_name=self.status.name,

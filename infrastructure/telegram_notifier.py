@@ -4,6 +4,8 @@ from core.notification import NotificationError
 from core.position import Position
 from core.trade import Trade
 from core.trade_statistics import TradeStatistics
+from core.pending_entry import PendingEntryStatus
+from core.pending_entry_event import PendingEntryEvent, PendingEntryEventKind
 
 
 class TelegramNotifier:
@@ -54,6 +56,27 @@ class TelegramNotifier:
             )
         )
         self._send(message)
+
+    def pending_entry_event(self, event: PendingEntryEvent) -> None:
+        title = _pending_event_title(event)
+        lines = [
+            title,
+            f"Symbol: {event.symbol}",
+            f"Direction: {event.decision.value}",
+            f"Entry: {event.entry}",
+            f"Requested volume: {event.requested_volume}",
+            f"Status: {event.status.value}",
+            f"OrderLinkId: {event.order_link_id}",
+        ]
+        if event.exchange_order_id is not None:
+            lines.append(f"Exchange order ID: {event.exchange_order_id}")
+        if event.filled_volume > 0:
+            lines.append(f"Filled volume: {event.filled_volume}")
+        if event.average_fill_price is not None:
+            lines.append(f"Average fill price: {event.average_fill_price}")
+        if event.rejection_reason is not None:
+            lines.append(f"Reason: {event.rejection_reason}")
+        self._send("\n".join(lines))
 
     def trade_closed(
         self,
@@ -114,3 +137,20 @@ class TelegramNotifier:
 
         if result["ok"] is not True:
             raise NotificationError("Telegram rejected the message.")
+
+
+def _pending_event_title(event: PendingEntryEvent) -> str:
+    if event.kind == PendingEntryEventKind.SUBMITTED:
+        return "Pending Entry Submitted"
+    if event.kind == PendingEntryEventKind.RECOVERED:
+        return "Pending Entry Recovered"
+    titles = {
+        PendingEntryStatus.WORKING: "Pending Entry Working",
+        PendingEntryStatus.PARTIALLY_FILLED: "Pending Entry Partially Filled",
+        PendingEntryStatus.CANCEL_REQUESTED: "Pending Entry Cancellation Requested",
+        PendingEntryStatus.FILLED: "Pending Entry Filled",
+        PendingEntryStatus.CANCELLED: "Pending Entry Cancelled",
+        PendingEntryStatus.EXPIRED: "Pending Entry Expired",
+        PendingEntryStatus.REJECTED: "Pending Entry Rejected",
+    }
+    return titles.get(event.status, "Pending Entry Status Changed")

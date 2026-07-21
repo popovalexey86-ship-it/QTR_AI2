@@ -23,7 +23,7 @@ def make_setup(
 
 def test_build_trade_request():
 
-    engine = RiskManager(risk_reward=2.0)
+    engine = RiskManager(risk_reward=2.0, symbol="BTCUSDT", volume=0.01)
 
     setup = make_setup(
         trend=Trend.BULLISH,
@@ -46,7 +46,7 @@ def test_build_trade_request():
 
 def test_calculate_take_profit_buy():
 
-    engine = RiskManager(risk_reward=2.0)
+    engine = RiskManager(risk_reward=2.0, symbol="BTCUSDT", volume=0.01)
 
     request = engine.build(
         setup=make_setup(
@@ -62,7 +62,7 @@ def test_calculate_take_profit_buy():
 
 def test_calculate_take_profit_sell():
 
-    engine = RiskManager(risk_reward=2.0)
+    engine = RiskManager(risk_reward=2.0, symbol="BTCUSDT", volume=0.01)
 
     request = engine.build(
         setup=make_setup(
@@ -74,3 +74,19 @@ def test_calculate_take_profit_sell():
     )
 
     assert request.take_profit == 90.0
+
+
+def test_configured_symbol_and_volume_are_used() -> None:
+    manager = RiskManager(
+        risk_reward=2.0,
+        symbol="ethusdt",
+        volume=0.25,
+    )
+
+    request = manager.build(
+        setup=make_setup(Trend.BULLISH, 100.0, 95.0),
+        decision=Decision.BUY,
+    )
+
+    assert request.symbol == "ETHUSDT"
+    assert request.volume == 0.25

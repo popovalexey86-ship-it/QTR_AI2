@@ -73,6 +73,8 @@ def create_trading_engine(
     # Risk & Execution
     risk_manager = RiskManager(
         risk_reward=2.0,
+        symbol=container.config.trade_symbol,
+        volume=container.config.trade_volume,
     )
 
     execution = Execution(
@@ -100,4 +102,5 @@ def create_trading_engine(
         risk_manager=risk_manager,
         execution=execution,
         position_monitor=position_monitor,
+        notifier=notifier,
     )
