@@ -108,3 +108,29 @@ def test_send_telegram_test_uses_public_connection_method(monkeypatch):
     )
     notifier.test_connection.assert_called_once_with()
     logger.info.assert_called_once_with("Telegram test notification sent.")
+
+
+def test_backtest_sample_does_not_build_live_dependencies(monkeypatch):
+    run_backtest = Mock()
+    build_live = Mock(side_effect=AssertionError("live dependencies were built"))
+    monkeypatch.setattr(main, "run_sample_backtest", run_backtest)
+    monkeypatch.setattr(main, "build_trading_engine", build_live)
+
+    main.main(backtest_sample=True)
+
+    run_backtest.assert_called_once_with()
+    build_live.assert_not_called()
+
+
+def test_sample_backtest_prints_summary_without_network(monkeypatch, capsys):
+    def fail_live_build():
+        raise AssertionError("live dependencies were built")
+
+    monkeypatch.setattr(main, "build_trading_engine", fail_live_build)
+
+    main.run_sample_backtest()
+
+    output = capsys.readouterr().out
+    assert "Backtest summary: BTCUSDT" in output
+    assert "Candles processed: 10" in output
+    assert "Final position:" in output

@@ -73,10 +73,24 @@ def send_telegram_test(container: Container) -> None:
     logger.info("Telegram test notification sent.")
 
 
+def run_sample_backtest() -> None:
+    """Run the deterministic in-memory sample without live dependencies."""
+    from backtesting.bootstrap import create_sample_backtest_runner
+    from backtesting.sample_data import create_sample_snapshots
+
+    result = create_sample_backtest_runner().run(create_sample_snapshots())
+    print(result.summary())
+
+
 def main(
     run_loop: bool = False,
     test_telegram: bool = False,
+    backtest_sample: bool = False,
 ) -> None:
+    if backtest_sample:
+        run_sample_backtest()
+        return
+
     container, engine = build_trading_engine()
 
     if test_telegram:
@@ -105,9 +119,16 @@ if __name__ == "__main__":
         help="Send a Telegram test notification and exit.",
     )
 
+    parser.add_argument(
+        "--backtest-sample",
+        action="store_true",
+        help="Run the deterministic in-memory backtest sample and exit.",
+    )
+
     arguments = parser.parse_args()
 
     main(
         run_loop=arguments.run_live,
         test_telegram=arguments.test_telegram,
+        backtest_sample=arguments.backtest_sample,
     )
