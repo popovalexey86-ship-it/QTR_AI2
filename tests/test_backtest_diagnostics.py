@@ -47,7 +47,8 @@ def test_real_smc_backtest_has_no_raw_setup_diagnostics(capsys):
         result = create_backtest_runner("BTCUSDT").run(snapshots)
 
     output = capsys.readouterr().out
-    assert result.has_open_position is True
+    assert result.has_open_position is False
+    assert result.has_pending_entry is True
     assert "Trend:" not in output
     assert "Last HL:" not in output
     assert "Last LH:" not in output

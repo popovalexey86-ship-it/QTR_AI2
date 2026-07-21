@@ -42,12 +42,15 @@ def test_trading_cycle_updates_position_monitor_before_analysis():
     strategy = Mock()
     strategy.analyze.return_value = AnalysisContext(market_data=Mock())
     position_monitor = Mock()
+    position_monitor.has_open_position.return_value = False
+    execution = Mock()
+    execution.has_pending_entry.return_value = False
 
     engine = TradingEngine(
         strategy=strategy,
         decision_engine=Mock(),
         risk_manager=Mock(),
-        execution=Mock(),
+        execution=execution,
         position_monitor=position_monitor,
     )
 
