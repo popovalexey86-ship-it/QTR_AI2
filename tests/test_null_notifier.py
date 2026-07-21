@@ -20,5 +20,8 @@ def test_null_notifier_accepts_open_and_closed_notifications():
     )
     notifier = NullNotifier()
 
+    assert notifier.runtime_started() is None
+    assert notifier.runtime_stopped() is None
+    assert notifier.runtime_failed("safe error") is None
     assert notifier.position_opened(position) is None
     assert notifier.trade_closed(trade, TradeStatistics()) is None

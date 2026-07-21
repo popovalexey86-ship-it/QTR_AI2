@@ -91,6 +91,31 @@ def test_trade_closed_includes_trade_and_current_statistics():
 
 
 @pytest.mark.parametrize(
+    "method_name, arguments, expected_message",
+    [
+        ("runtime_started", (), "🚀 QTR_AI2 Bot Started"),
+        ("runtime_stopped", (), "🛑 QTR_AI2 Bot Stopped"),
+        (
+            "runtime_failed",
+            ("Trading loop error: RuntimeError",),
+            "⚠️ QTR_AI2 Critical Runtime Error\n"
+            "Error: Trading loop error: RuntimeError",
+        ),
+    ],
+)
+def test_lifecycle_notifications_have_expected_format(
+    method_name,
+    arguments,
+    expected_message,
+):
+    notifier, session, _ = make_notifier()
+
+    getattr(notifier, method_name)(*arguments)
+
+    assert session.post.call_args.kwargs["json"]["text"] == expected_message
+
+
+@pytest.mark.parametrize(
     "request_error",
     [requests.Timeout(f"timeout {TOKEN}"), requests.ConnectionError(f"connection {TOKEN}"),
      requests.RequestException(f"request {TOKEN}")],
