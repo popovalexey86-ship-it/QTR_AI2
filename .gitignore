@@ -20,6 +20,7 @@ __pycache__/
 
 # Persistent local trading data
 data/
+.cache/bybit/
 
 # pytest
 .pytest_cache/

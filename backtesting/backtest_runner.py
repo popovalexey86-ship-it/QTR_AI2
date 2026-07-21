@@ -1,9 +1,11 @@
-from collections.abc import Sequence
+from collections.abc import Iterable
+from datetime import datetime
 
 from backtesting.backtest_result import BacktestResult
-from backtesting.simulated_broker import SimulatedBroker
+from backtesting.simulated_broker import SimulatedBroker, SimulatedOrderRejected
 from core.decision_engine import DecisionEngine
 from core.execution import Execution
+from core.logger import logger
 from core.market_data import MarketData
 from core.position_monitor import PositionMonitor
 from core.risk_manager import RiskManager
@@ -51,19 +53,37 @@ class BacktestRunner:
         )
         self._has_run = False
 
-    def run(self, snapshots: Sequence[MarketData]) -> BacktestResult:
+    def run(self, snapshots: Iterable[MarketData]) -> BacktestResult:
         if self._has_run:
             raise RuntimeError("A BacktestRunner instance can only run once.")
 
-        ordered_snapshots = self._validate_snapshots(snapshots)
         self._has_run = True
+        candles_processed = 0
+        rejected_orders = 0
+        previous_timestamp = None
 
-        for market_data in ordered_snapshots:
+        for position, market_data in enumerate(snapshots, start=1):
+            previous_timestamp = self._validate_snapshot(
+                market_data,
+                position=position,
+                previous_timestamp=previous_timestamp,
+            )
             self._broker.update_market(market_data.last)
-            self._engine.process(market_data)
+            try:
+                self._engine.process(market_data)
+            except SimulatedOrderRejected:
+                rejected_orders += 1
+                logger.info(
+                    "Simulated market order rejected because protective "
+                    "levels are invalid for the candle-close fill."
+                )
             # TradingEngine checks positions before execution. Synchronize the
             # monitor after execution so a close on the next candle is observed.
             self._position_monitor.update()
+            candles_processed += 1
+
+        if candles_processed == 0:
+            raise BacktestInputError("Historical market data cannot be empty.")
 
         trades = self._journal.trades
         gross_profit = sum(trade.pnl for trade in trades if trade.pnl > 0)
@@ -71,7 +91,7 @@ class BacktestRunner:
 
         return BacktestResult(
             symbol=self._symbol,
-            candles_processed=len(ordered_snapshots),
+            candles_processed=candles_processed,
             total_trades=self._statistics.total_trades,
             winning_trades=self._statistics.wins,
             losing_trades=self._statistics.losses,
@@ -81,59 +101,50 @@ class BacktestRunner:
             net_pnl=self._statistics.net_pnl,
             has_open_position=self._broker.get_open_position() is not None,
             completed_trades=trades,
+            rejected_orders=rejected_orders,
         )
 
-    def _validate_snapshots(
+    def _validate_snapshot(
         self,
-        snapshots: Sequence[MarketData],
-    ) -> tuple[MarketData, ...]:
-        if not snapshots:
-            raise BacktestInputError("Historical market data cannot be empty.")
+        market_data: MarketData,
+        *,
+        position: int,
+        previous_timestamp: datetime | None,
+    ) -> datetime:
+        if market_data.symbol != self._symbol:
+            raise BacktestInputError(
+                "Historical market data must contain exactly one symbol: "
+                f"expected {self._symbol!r}, got {market_data.symbol!r}."
+            )
+        if not market_data.candles:
+            raise BacktestInputError(
+                f"MarketData snapshot {position} contains no candles."
+            )
 
-        validated = tuple(snapshots)
-        previous_timestamp = None
-        terminal_timestamps = set()
+        candle_timestamps = [candle.timestamp for candle in market_data.candles]
+        if len(candle_timestamps) != len(set(candle_timestamps)):
+            raise BacktestInputError(
+                f"MarketData snapshot {position} has duplicate timestamps."
+            )
+        if any(
+            current <= previous
+            for previous, current in zip(
+                candle_timestamps,
+                candle_timestamps[1:],
+            )
+        ):
+            raise BacktestInputError(
+                f"MarketData snapshot {position} is not chronological."
+            )
 
-        for position, market_data in enumerate(validated, start=1):
-            if market_data.symbol != self._symbol:
-                raise BacktestInputError(
-                    "Historical market data must contain exactly one symbol: "
-                    f"expected {self._symbol!r}, got {market_data.symbol!r}."
-                )
-            if not market_data.candles:
-                raise BacktestInputError(
-                    f"MarketData snapshot {position} contains no candles."
-                )
-
-            candle_timestamps = [
-                candle.timestamp for candle in market_data.candles
-            ]
-            if len(candle_timestamps) != len(set(candle_timestamps)):
-                raise BacktestInputError(
-                    f"MarketData snapshot {position} has duplicate timestamps."
-                )
-            if any(
-                current <= previous
-                for previous, current in zip(
-                    candle_timestamps,
-                    candle_timestamps[1:],
-                )
-            ):
-                raise BacktestInputError(
-                    f"MarketData snapshot {position} is not chronological."
-                )
-
-            timestamp = market_data.last.timestamp
-            if timestamp in terminal_timestamps:
+        timestamp = market_data.last.timestamp
+        if previous_timestamp is not None:
+            if timestamp == previous_timestamp:
                 raise BacktestInputError(
                     f"Duplicate snapshot timestamp: {timestamp.isoformat()}."
                 )
-            if previous_timestamp is not None and timestamp < previous_timestamp:
+            if timestamp < previous_timestamp:
                 raise BacktestInputError(
                     "Historical snapshots must be sorted chronologically."
                 )
-
-            terminal_timestamps.add(timestamp)
-            previous_timestamp = timestamp
-
-        return validated
+        return timestamp

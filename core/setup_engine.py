@@ -1,5 +1,6 @@
 from core.bos import BOS
 from core.choch import CHOCH
+from core.logger import logger
 from core.market_structure_state import MarketStructureState
 from core.setup import Setup
 from core.trend import Trend
@@ -74,15 +75,15 @@ class SetupEngine:
         #
         # Формируем сетап
         #
-        print("=" * 60)
-        print("Trend:", state.trend)
-        print("Entry:", latest_event.price)
-
-        print("Last HL:", state.last_hl)
-        print("Last LH:", state.last_lh)
-
-        print("Stop:", stop_loss)
-        print("=" * 60)
+        logger.debug(
+            "Setup diagnostics | trend=%s entry=%s last_hl=%s "
+            "last_lh=%s stop=%s",
+            state.trend,
+            latest_event.price,
+            state.last_hl,
+            state.last_lh,
+            stop_loss,
+        )
 
         return Setup(
             index=latest_event.index,

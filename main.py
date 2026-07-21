@@ -1,6 +1,7 @@
 import argparse
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 from config.bootstrap import create_notifier, create_trading_engine
 from core.logger import logger
@@ -82,13 +83,108 @@ def run_sample_backtest() -> None:
     print(result.summary())
 
 
+def parse_utc_datetime(value: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            "Timestamp must be a valid ISO-8601 UTC datetime."
+        ) from None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise argparse.ArgumentTypeError("Timestamp must be timezone-aware UTC.")
+    if parsed.utcoffset() != UTC.utcoffset(parsed):
+        raise argparse.ArgumentTypeError("Timestamp must use UTC.")
+    return parsed.astimezone(UTC)
+
+
+def run_bybit_backtest(
+    *,
+    symbol: str,
+    interval: str,
+    start: datetime,
+    end: datetime,
+    refresh_cache: bool = False,
+    history_window: int = 500,
+    verbose: bool = False,
+) -> None:
+    """Download/cache public candles and run without live dependencies."""
+    from backtesting.bootstrap import create_backtest_runner
+    from backtesting.historical_data import (
+        HistoricalCandleCache,
+        HistoricalRequest,
+        load_historical_data,
+    )
+    from backtesting.logging import scoped_backtest_logging
+    from backtesting.snapshots import iter_market_data_snapshots
+    from infrastructure.bybit.bybit_historical_client import BybitHistoricalClient
+
+    if history_window <= 0:
+        raise ValueError("History window must be greater than zero.")
+
+    request = HistoricalRequest(
+        category="linear",
+        symbol=symbol,
+        interval=interval,
+        start=start,
+        end=end,
+    )
+    historical = load_historical_data(
+        client=BybitHistoricalClient(),
+        cache=HistoricalCandleCache(),
+        request=request,
+        refresh=refresh_cache,
+    )
+    snapshots = iter_market_data_snapshots(
+        historical.candles,
+        symbol=symbol,
+        interval=interval,
+        history_window=history_window,
+    )
+    with scoped_backtest_logging(verbose=verbose):
+        result = create_backtest_runner(symbol).run(snapshots)
+
+    print(f"Source: {historical.source}")
+    print("Category: linear")
+    print(f"Symbol / interval: {symbol} / {interval}")
+    print(f"Requested range: {start.isoformat()} -> {end.isoformat()}")
+    print(f"Candles downloaded: {len(historical.candles)}")
+    print(f"Candles processed: {result.candles_processed}")
+    print(f"Rejected simulated orders: {result.rejected_orders}")
+    print(f"Cache path: {historical.cache_path}")
+    print(result.summary())
+
+
 def main(
     run_loop: bool = False,
     test_telegram: bool = False,
     backtest_sample: bool = False,
+    backtest_bybit: bool = False,
+    symbol: str | None = None,
+    interval: str | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    refresh_cache: bool = False,
+    history_window: int = 500,
+    verbose_backtest: bool = False,
 ) -> None:
     if backtest_sample:
         run_sample_backtest()
+        return
+
+    if backtest_bybit:
+        if symbol is None or interval is None or start is None or end is None:
+            raise ValueError(
+                "Bybit backtest requires symbol, interval, start, and end."
+            )
+        run_bybit_backtest(
+            symbol=symbol,
+            interval=interval,
+            start=start,
+            end=end,
+            refresh_cache=refresh_cache,
+            history_window=history_window,
+            verbose=verbose_backtest,
+        )
         return
 
     container, engine = build_trading_engine()
@@ -125,10 +221,42 @@ if __name__ == "__main__":
         help="Run the deterministic in-memory backtest sample and exit.",
     )
 
+    parser.add_argument(
+        "--backtest-bybit",
+        action="store_true",
+        help="Run a cached backtest using public Bybit historical candles.",
+    )
+    parser.add_argument("--symbol")
+    parser.add_argument("--interval")
+    parser.add_argument("--start", type=parse_utc_datetime)
+    parser.add_argument("--end", type=parse_utc_datetime)
+    parser.add_argument("--refresh-cache", action="store_true")
+    parser.add_argument("--history-window", type=int, default=500)
+    parser.add_argument("--verbose-backtest", action="store_true")
+
     arguments = parser.parse_args()
+
+    if arguments.backtest_bybit:
+        missing = [
+            name
+            for name in ("symbol", "interval", "start", "end")
+            if getattr(arguments, name) is None
+        ]
+        if missing:
+            parser.error(
+                "--backtest-bybit requires --symbol, --interval, --start, and --end"
+            )
 
     main(
         run_loop=arguments.run_live,
         test_telegram=arguments.test_telegram,
         backtest_sample=arguments.backtest_sample,
+        backtest_bybit=arguments.backtest_bybit,
+        symbol=arguments.symbol,
+        interval=arguments.interval,
+        start=arguments.start,
+        end=arguments.end,
+        refresh_cache=arguments.refresh_cache,
+        history_window=arguments.history_window,
+        verbose_backtest=arguments.verbose_backtest,
     )

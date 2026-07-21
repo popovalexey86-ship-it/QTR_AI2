@@ -1,7 +1,14 @@
+import argparse
 from types import SimpleNamespace
 from unittest.mock import Mock, call
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import pytest
 
 import main
+from backtesting.historical_data import HistoricalDataResult
+from core.candle import Candle
 from core.notification import NotificationError
 
 
@@ -134,3 +141,92 @@ def test_sample_backtest_prints_summary_without_network(monkeypatch, capsys):
     assert "Backtest summary: BTCUSDT" in output
     assert "Candles processed: 10" in output
     assert "Final position:" in output
+
+
+def test_parse_utc_datetime_accepts_z_and_rejects_naive_or_non_utc():
+    assert main.parse_utc_datetime("2025-01-01T00:00:00Z") == datetime(
+        2025, 1, 1, tzinfo=UTC
+    )
+
+    with pytest.raises(argparse.ArgumentTypeError, match="timezone-aware UTC"):
+        main.parse_utc_datetime("2025-01-01T00:00:00")
+    with pytest.raises(argparse.ArgumentTypeError, match="must use UTC"):
+        main.parse_utc_datetime("2025-01-01T01:00:00+01:00")
+
+
+def test_historical_backtest_path_does_not_build_live_dependencies(monkeypatch):
+    run_historical = Mock()
+    build_live = Mock(side_effect=AssertionError("live dependencies were built"))
+    start = datetime(2025, 1, 1, tzinfo=UTC)
+    end = start + timedelta(minutes=2)
+    monkeypatch.setattr(main, "run_bybit_backtest", run_historical)
+    monkeypatch.setattr(main, "build_trading_engine", build_live)
+
+    main.main(
+        backtest_bybit=True,
+        symbol="BTCUSDT",
+        interval="1",
+        start=start,
+        end=end,
+        refresh_cache=True,
+        history_window=20,
+    )
+
+    run_historical.assert_called_once_with(
+        symbol="BTCUSDT",
+        interval="1",
+        start=start,
+        end=end,
+        refresh_cache=True,
+        history_window=20,
+        verbose=False,
+    )
+    build_live.assert_not_called()
+
+
+def test_historical_backtest_uses_no_live_or_telegram_network(monkeypatch, capsys):
+    start = datetime(2025, 1, 1, tzinfo=UTC)
+    end = start + timedelta(minutes=1)
+    candle = Candle(
+        timestamp=start,
+        open=100.0,
+        high=101.0,
+        low=99.0,
+        close=100.0,
+        volume=1.0,
+    )
+
+    def fake_load_historical_data(**kwargs):
+        return HistoricalDataResult(
+            candles=(candle,),
+            source="cache",
+            cache_path=Path("fake-cache.json"),
+        )
+
+    def fail(*args, **kwargs):
+        raise AssertionError("live or Telegram dependency was used")
+
+    monkeypatch.setattr(
+        "backtesting.historical_data.load_historical_data",
+        fake_load_historical_data,
+    )
+    monkeypatch.setattr(main, "build_trading_engine", fail)
+    monkeypatch.setattr(
+        "infrastructure.telegram_notifier.TelegramNotifier._send",
+        fail,
+    )
+
+    main.run_bybit_backtest(
+        symbol="BTCUSDT",
+        interval="1",
+        start=start,
+        end=end,
+    )
+
+    captured = capsys.readouterr()
+    output = captured.out
+    assert "Source: cache" in output
+    assert "Candles downloaded: 1" in output
+    assert "Candles processed: 1" in output
+    assert "Trading cycle started" not in captured.err
+    assert "Setup not found" not in captured.err

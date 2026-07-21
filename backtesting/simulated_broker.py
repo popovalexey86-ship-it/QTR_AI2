@@ -6,13 +6,17 @@ from core.trade import Trade
 from core.trade_request import TradeRequest
 
 
+class SimulatedOrderRejected(ValueError):
+    """Raised when fixed protective levels are invalid for a market fill."""
+
+
 class SimulatedBroker(Broker):
     """Deterministic single-symbol broker with zero fees and no slippage.
 
-    Positions open at the requested entry. Starting with the next processed
-    candle, stop-loss and take-profit levels are evaluated. If both are touched
-    by one candle, stop-loss wins to keep the result deterministic and
-    conservative.
+    The completed signal candle close approximates a zero-slippage live market
+    fill. Starting with the next processed candle, stop-loss and take-profit
+    levels are evaluated. If both are touched by one candle, stop-loss wins to
+    keep the result deterministic and conservative.
     """
 
     def __init__(self, symbol: str, fee: float = 0.0) -> None:
@@ -55,6 +59,9 @@ class SimulatedBroker(Broker):
         if self._current_candle is None:
             raise RuntimeError("Market data must be processed before opening.")
 
+        fill_price = self._current_candle.close
+        self._validate_protective_levels(request, fill_price)
+
         ticket = f"SIM-{self._next_ticket:06d}"
         self._next_ticket += 1
         self._position = Position(
@@ -63,13 +70,29 @@ class SimulatedBroker(Broker):
             # current RiskManager keeps a live BTCUSDT default in TradeRequest.
             symbol=self._symbol,
             decision=request.decision,
-            entry=request.entry,
+            entry=fill_price,
             stop_loss=request.stop_loss,
             take_profit=request.take_profit,
             volume=request.volume,
             opened_at=self._current_candle.timestamp,
         )
         return self._position
+
+    @staticmethod
+    def _validate_protective_levels(
+        request: TradeRequest,
+        fill_price: float,
+    ) -> None:
+        valid = False
+        if request.decision == Decision.BUY:
+            valid = request.stop_loss < fill_price < request.take_profit
+        elif request.decision == Decision.SELL:
+            valid = request.take_profit < fill_price < request.stop_loss
+
+        if not valid:
+            raise SimulatedOrderRejected(
+                "Protective levels are invalid for the simulated market fill."
+            )
 
     def close_position(self, position: Position) -> None:
         if self._position is None or self._position.ticket != position.ticket:
