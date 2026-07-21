@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -219,4 +220,52 @@ def test_market_data_symbol_is_authoritative_for_setup_identity() -> None:
         entry=pending.request.entry,
         stop_loss=pending.request.stop_loss,
         take_profit=pending.request.take_profit,
+    )
+
+
+def test_runtime_recovery_and_poll_use_explicit_facade_order() -> None:
+    execution = Mock()
+    position_monitor = Mock()
+    engine = TradingEngine(
+        strategy=Mock(),
+        decision_engine=Mock(),
+        risk_manager=Mock(),
+        execution=execution,
+        position_monitor=position_monitor,
+    )
+    parent = Mock()
+    parent.attach_mock(execution.recover_pending_entry, "recover")
+    parent.attach_mock(execution.refresh_pending_entry, "refresh")
+    parent.attach_mock(position_monitor.update, "monitor")
+
+    engine.recover_runtime_state()
+    engine.poll_runtime_state()
+
+    assert parent.mock_calls == [
+        call.recover(),
+        call.monitor(),
+        call.monitor(),
+        call.refresh(),
+    ]
+
+
+def test_trading_engine_age_facade_delegates_without_bybit_dependency() -> None:
+    execution = Mock()
+    expected = Mock()
+    execution.age_pending_entry.return_value = expected
+    engine = TradingEngine(
+        strategy=Mock(),
+        decision_engine=Mock(),
+        risk_manager=Mock(),
+        execution=execution,
+        position_monitor=Mock(),
+    )
+    timestamps = (START + timedelta(minutes=15),)
+
+    result = engine.age_pending_entry(timestamps, ttl_candles=4)
+
+    assert result is expected
+    execution.age_pending_entry.assert_called_once_with(
+        timestamps,
+        ttl_candles=4,
     )

@@ -33,11 +33,11 @@ class BybitMapper:
 
         # Bybit возвращает свечи от новых к старым.
         # Разворачиваем их в хронологический порядок.
-        raw_candles.reverse()
+        chronological_candles = list(reversed(raw_candles))
 
         candles = [
             BybitMapper.to_candle(raw, index)
-            for index, raw in enumerate(raw_candles)
+            for index, raw in enumerate(chronological_candles)
         ]
 
         return MarketData(

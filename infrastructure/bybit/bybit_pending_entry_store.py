@@ -41,6 +41,7 @@ _TOP_LEVEL_FIELDS = frozenset(
         "completed_candles_active",
         "filled_volume",
         "average_fill_price",
+        "expiry_requested",
         "last_aged_candle_timestamp",
     }
 )
@@ -215,6 +216,7 @@ def _encode_state(state: PersistedBybitPendingEntry) -> dict[str, object]:
         "completed_candles_active": entry.completed_candles_active,
         "filled_volume": entry.filled_volume,
         "average_fill_price": entry.average_fill_price,
+        "expiry_requested": entry.expiry_requested,
         "last_aged_candle_timestamp": (
             _format_utc_timestamp(validated.last_aged_candle_timestamp)
             if validated.last_aged_candle_timestamp is not None
@@ -293,6 +295,9 @@ def _decode_state(raw_state: object) -> PersistedBybitPendingEntry:
         state,
         "average_fill_price",
     )
+    expiry_requested = state.get("expiry_requested")
+    if not isinstance(expiry_requested, bool):
+        raise ValueError("Invalid persisted expiry marker.")
     last_aged_value = state.get("last_aged_candle_timestamp")
     if last_aged_value is None:
         last_aged_timestamp = None
@@ -315,6 +320,7 @@ def _decode_state(raw_state: object) -> PersistedBybitPendingEntry:
         completed_candles_active=completed_candles_active,
         filled_volume=filled_volume,
         average_fill_price=average_fill_price,
+        expiry_requested=expiry_requested,
     )
     return PersistedBybitPendingEntry(
         schema_version=schema_version,

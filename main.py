@@ -11,6 +11,10 @@ from infrastructure.container import Container
 from infrastructure.telegram_notifier import TelegramNotifier
 
 
+class LiveTestnetRequiredError(RuntimeError):
+    """Raised when the MVP live loop is requested outside Bybit Testnet."""
+
+
 def build_trading_engine() -> tuple[Container, TradingEngine]:
     """Build application dependencies without making a Bybit API call."""
     container = Container()
@@ -30,22 +34,56 @@ def run_trading_cycle(
     notifier: NotificationPort | None = None,
 ) -> None:
     """Run the live polling loop when explicitly requested."""
-    last_timestamp = None
+    if container.config.bybit_testnet is not True:
+        raise LiveTestnetRequiredError(
+            "Live trading is restricted to Bybit Testnet."
+        )
+
     if notifier is None:
         notifier = create_notifier(container.config)
 
-    logger.info("Trading cycle started.")
-
     try:
-        _notify_runtime_event("started", notifier.runtime_started)
+        engine.recover_runtime_state()
+    except Exception as error:
+        error_message = f"Runtime recovery failed: {type(error).__name__}"
+        logger.error(error_message)
+        _notify_runtime_event(
+            "failed",
+            lambda: notifier.runtime_failed(error_message),
+        )
+        return
 
+    successful_analysis_timestamp: datetime | None = None
+    logger.info("Trading cycle started.")
+    _notify_runtime_event("started", notifier.runtime_started)
+    try:
         while True:
             try:
-                market_data = container.collector.collect()
+                market_data = container.collector.collect_completed()
+                engine.poll_runtime_state()
+                completed_timestamps = tuple(
+                    candle.timestamp for candle in market_data.candles
+                )
+                latest_timestamp = market_data.last.timestamp
 
-                if market_data.last.timestamp != last_timestamp:
-                    last_timestamp = market_data.last.timestamp
+                if successful_analysis_timestamp is None:
+                    engine.age_pending_entry(
+                        completed_timestamps,
+                        ttl_candles=container.config.pending_entry_ttl_candles,
+                    )
+                    successful_analysis_timestamp = latest_timestamp
+                    logger.info("Waiting for new candle...")
+                elif latest_timestamp < successful_analysis_timestamp:
+                    raise RuntimeError(
+                        "Completed candle timestamp regressed."
+                    )
+                elif latest_timestamp > successful_analysis_timestamp:
+                    engine.age_pending_entry(
+                        completed_timestamps,
+                        ttl_candles=container.config.pending_entry_ttl_candles,
+                    )
                     engine.process(market_data)
+                    successful_analysis_timestamp = latest_timestamp
                     logger.info("Waiting for new candle...")
 
                 time.sleep(5)

@@ -86,3 +86,56 @@ def test_disabled_telegram_allows_missing_credentials(tmp_path):
     )
 
     assert config.telegram_enabled is False
+
+
+def test_pending_runtime_defaults(monkeypatch):
+    monkeypatch.setattr("infrastructure.config.load_dotenv", lambda: None)
+    monkeypatch.delenv("BYBIT_PENDING_ENTRY_STATE_PATH", raising=False)
+    monkeypatch.delenv("PENDING_ENTRY_TTL_CANDLES", raising=False)
+
+    config = Config.load()
+
+    assert config.bybit_pending_entry_state_path == Path(
+        "data/bybit_pending_entry.json"
+    )
+    assert config.pending_entry_ttl_candles == 4
+
+
+def test_pending_runtime_environment_overrides(monkeypatch, tmp_path):
+    state_path = tmp_path / "pending.json"
+    monkeypatch.setenv("BYBIT_PENDING_ENTRY_STATE_PATH", str(state_path))
+    monkeypatch.setenv("PENDING_ENTRY_TTL_CANDLES", "7")
+
+    config = Config.load()
+
+    assert config.bybit_pending_entry_state_path == state_path
+    assert config.pending_entry_ttl_candles == 7
+
+
+@pytest.mark.parametrize("value", ["", "0", "-1", "abc", "1.5"])
+def test_invalid_pending_ttl_environment_fails_safely(monkeypatch, value):
+    monkeypatch.setenv("PENDING_ENTRY_TTL_CANDLES", value)
+
+    with pytest.raises(ValueError, match="positive integer") as error:
+        Config.load()
+
+    assert "BYBIT_API" not in str(error.value)
+
+
+def test_empty_pending_state_path_environment_is_rejected(monkeypatch):
+    monkeypatch.setenv("BYBIT_PENDING_ENTRY_STATE_PATH", "   ")
+
+    with pytest.raises(ValueError, match="path cannot be empty"):
+        Config.load()
+
+
+def test_config_repr_excludes_bybit_credentials(tmp_path):
+    config = Config(
+        bybit_api_key="sensitive-key",
+        bybit_api_secret="sensitive-secret",
+        bybit_testnet=True,
+        trade_journal_path=tmp_path / "trades.csv",
+    )
+
+    assert "sensitive-key" not in repr(config)
+    assert "sensitive-secret" not in repr(config)

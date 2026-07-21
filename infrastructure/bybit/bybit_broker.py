@@ -1,6 +1,6 @@
 from collections.abc import Mapping
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 import math
 import time
 from typing import Any
@@ -370,6 +370,7 @@ class BybitBroker(Broker):
                 ) from None
             self._restore_pending_entry(persisted)
             self._reconcile_recovered_entry(restored, snapshot)
+            self._resume_expiry_cancellation()
             return self._pending_entry
 
         self._restore_pending_entry(persisted)
@@ -392,6 +393,73 @@ class BybitBroker(Broker):
             raise BybitPendingEntryRecoveryError(
                 "Historical state does not prove an active pending entry."
             )
+        self._resume_expiry_cancellation()
+        return self._pending_entry
+
+    def refresh_pending_entry(self) -> PendingEntry | None:
+        active = self._pending_entry
+        if active is None:
+            return None
+        self.get_entry_order(active.order_link_id)
+        return self._pending_entry
+
+    def age_pending_entry(
+        self,
+        completed_candle_timestamps: tuple[datetime, ...],
+        *,
+        ttl_candles: int,
+    ) -> PendingEntry | None:
+        _validate_ttl(ttl_candles)
+        normalized_timestamps = _normalize_completed_timestamps(
+            completed_candle_timestamps
+        )
+        active = self._pending_entry
+        if active is None:
+            return None
+        if active.status in _TERMINAL_ENTRY_STATUSES:
+            return active
+
+        refreshed = self.refresh_pending_entry()
+        if refreshed is None:
+            return None
+        if refreshed.status == PendingEntryStatus.CANCEL_REQUESTED:
+            return refreshed
+        if refreshed.expiry_requested:
+            self._resume_expiry_cancellation()
+            return self._pending_entry
+
+        last_aged = self._last_aged_candle_timestamp
+        if (
+            last_aged is not None
+            and normalized_timestamps
+            and normalized_timestamps[-1] < last_aged
+        ):
+            raise BybitPendingEntryError(
+                "Completed candle timestamps regressed during pending-entry aging."
+            )
+        eligible = tuple(
+            timestamp
+            for timestamp in normalized_timestamps
+            if timestamp > refreshed.signal_timestamp
+            and (last_aged is None or timestamp > last_aged)
+        )
+        if not eligible:
+            return refreshed
+
+        updated_count = refreshed.completed_candles_active + len(eligible)
+        expiry_requested = updated_count >= ttl_candles
+        updated = replace(
+            refreshed,
+            completed_candles_active=updated_count,
+            expiry_requested=expiry_requested,
+        )
+        self._store_aged_pending_entry(
+            previous=refreshed,
+            updated=updated,
+            last_aged_timestamp=eligible[-1],
+        )
+        if expiry_requested:
+            self.cancel_entry(updated.order_link_id)
         return self._pending_entry
 
     def _reconcile_recovered_entry(
@@ -407,6 +475,36 @@ class BybitBroker(Broker):
             raise BybitPendingEntryRecoveryError(
                 "Pending-entry state could not be reconciled during recovery."
             ) from None
+
+    def _resume_expiry_cancellation(self) -> None:
+        active = self._pending_entry
+        if (
+            active is None
+            or not active.expiry_requested
+            or active.status == PendingEntryStatus.CANCEL_REQUESTED
+            or active.status in _TERMINAL_ENTRY_STATUSES
+        ):
+            return
+        self.cancel_entry(active.order_link_id)
+
+    def _store_aged_pending_entry(
+        self,
+        *,
+        previous: PendingEntry,
+        updated: PendingEntry,
+        last_aged_timestamp: datetime,
+    ) -> None:
+        previous_last_aged = self._last_aged_candle_timestamp
+        self._pending_entry = updated
+        self._entry_orders[updated.order_link_id] = updated
+        self._last_aged_candle_timestamp = last_aged_timestamp
+        try:
+            self._persist_pending_entry(updated)
+        except BybitPendingEntryPersistenceError:
+            self._pending_entry = previous
+            self._entry_orders[previous.order_link_id] = previous
+            self._last_aged_candle_timestamp = previous_last_aged
+            raise
 
     def get_pending_entry(self) -> PendingEntry | None:
         return self._pending_entry
@@ -548,41 +646,75 @@ class BybitBroker(Broker):
             raise BybitPendingEntryError(
                 "Bybit returned a conflicting requested quantity."
             )
+        if snapshot.filled_volume < active.filled_volume:
+            raise BybitPendingEntryError(
+                "Bybit returned a regressing filled quantity."
+            )
 
-        if _is_stale_snapshot(active.status, snapshot.status):
+        effective_snapshot = snapshot
+        transition_active = active
+        if (
+            snapshot.status == PendingEntryStatus.CANCELLED
+            and active.expiry_requested
+            and active.filled_volume == 0
+            and snapshot.filled_volume == 0
+        ):
+            effective_snapshot = replace(
+                snapshot,
+                status=PendingEntryStatus.EXPIRED,
+            )
+            if active.status != PendingEntryStatus.CANCEL_REQUESTED:
+                try:
+                    validate_pending_entry_transition(
+                        active.status,
+                        PendingEntryStatus.CANCEL_REQUESTED,
+                    )
+                except InvalidPendingEntryTransition:
+                    raise BybitPendingEntryError(
+                        "Expiry cancellation confirmation is inconsistent."
+                    ) from None
+                transition_active = replace(
+                    active,
+                    status=PendingEntryStatus.CANCEL_REQUESTED,
+                )
+
+        if _is_stale_snapshot(active.status, effective_snapshot.status):
             self._persist_pending_entry(active)
             return _snapshot_from_pending(active)
 
         if (
             active.status == PendingEntryStatus.CANCEL_REQUESTED
-            and snapshot.status == PendingEntryStatus.PARTIALLY_FILLED
+            and effective_snapshot.status == PendingEntryStatus.PARTIALLY_FILLED
         ):
             updated = replace(
                 active,
-                filled_volume=snapshot.filled_volume,
-                average_fill_price=snapshot.average_fill_price,
-                exchange_order_id=snapshot.exchange_order_id,
+                filled_volume=effective_snapshot.filled_volume,
+                average_fill_price=effective_snapshot.average_fill_price,
+                exchange_order_id=effective_snapshot.exchange_order_id,
             )
-        elif active.status == snapshot.status:
+        elif active.status == effective_snapshot.status:
             updated = replace(
                 active,
-                filled_volume=snapshot.filled_volume,
-                average_fill_price=snapshot.average_fill_price,
-                exchange_order_id=snapshot.exchange_order_id,
+                filled_volume=effective_snapshot.filled_volume,
+                average_fill_price=effective_snapshot.average_fill_price,
+                exchange_order_id=effective_snapshot.exchange_order_id,
             )
         else:
             try:
-                validate_pending_entry_transition(active.status, snapshot.status)
+                validate_pending_entry_transition(
+                    transition_active.status,
+                    effective_snapshot.status,
+                )
             except InvalidPendingEntryTransition:
                 raise BybitPendingEntryError(
                     "Bybit returned an invalid pending-entry state transition."
                 ) from None
             updated = replace(
                 active,
-                status=snapshot.status,
-                filled_volume=snapshot.filled_volume,
-                average_fill_price=snapshot.average_fill_price,
-                exchange_order_id=snapshot.exchange_order_id,
+                status=effective_snapshot.status,
+                filled_volume=effective_snapshot.filled_volume,
+                average_fill_price=effective_snapshot.average_fill_price,
+                exchange_order_id=effective_snapshot.exchange_order_id,
             )
 
         self._entry_orders[active.order_link_id] = updated
@@ -595,12 +727,12 @@ class BybitBroker(Broker):
             except BybitPendingEntryPersistenceError:
                 self._pending_entry = updated
                 raise
-            return snapshot
+            return effective_snapshot
 
         self._persist_pending_entry(updated)
-        if snapshot.status == PendingEntryStatus.PARTIALLY_FILLED:
+        if effective_snapshot.status == PendingEntryStatus.PARTIALLY_FILLED:
             self.cancel_entry(active.order_link_id)
-        return snapshot
+        return effective_snapshot
 
     def open_position(self, request: TradeRequest) -> Position:
         order = self._order_mapper.to_order_request(request)
@@ -785,6 +917,32 @@ def _order_link_id(item: Mapping[str, Any]) -> str:
             "An active QTR order has an invalid order link ID."
         )
     return value
+
+
+def _validate_ttl(ttl_candles: int) -> None:
+    if (
+        isinstance(ttl_candles, bool)
+        or not isinstance(ttl_candles, int)
+        or ttl_candles <= 0
+    ):
+        raise BybitPendingEntryError(
+            "Pending-entry TTL must be a positive integer."
+        )
+
+
+def _normalize_completed_timestamps(
+    timestamps: tuple[datetime, ...],
+) -> tuple[datetime, ...]:
+    for timestamp in timestamps:
+        if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+            raise BybitPendingEntryError(
+                "Completed candle timestamps must be timezone-aware UTC."
+            )
+        if timestamp.utcoffset() != timedelta(0):
+            raise BybitPendingEntryError(
+                "Completed candle timestamps must use UTC."
+            )
+    return tuple(sorted(set(timestamps)))
 
 
 _TERMINAL_ENTRY_STATUSES = frozenset(

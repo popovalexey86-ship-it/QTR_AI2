@@ -232,3 +232,30 @@ def test_recovery_registration_does_not_weaken_setup_key_deduplication() -> None
 
     with pytest.raises(DuplicatePendingSetupError, match="structural setup"):
         submit(execution, trade_request)
+
+
+def test_execution_recovery_registers_order_link_id_for_future_dedup() -> None:
+    broker = SimulatedBroker("BTCUSDT")
+    original_execution = Execution(broker)
+    trade_request = request()
+    original = submit(original_execution, trade_request)
+    recovered_execution = Execution(broker)
+
+    recovered = recovered_execution.recover_pending_entry()
+    broker.cancel_entry(original.order_link_id)
+
+    assert recovered == original
+    with pytest.raises(DuplicatePendingSetupError, match="recovered"):
+        submit(recovered_execution, trade_request)
+
+
+def test_execution_recovery_is_idempotent() -> None:
+    broker = SimulatedBroker("BTCUSDT")
+    original = submit(Execution(broker), request())
+    execution = Execution(broker)
+
+    first = execution.recover_pending_entry()
+    second = execution.recover_pending_entry()
+
+    assert first == original
+    assert second == original

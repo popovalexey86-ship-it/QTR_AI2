@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from core.logger import logger
 
 from core.decision import Decision
@@ -7,6 +9,7 @@ from core.execution import Execution
 from core.risk_manager import RiskManager
 from core.decision_engine import DecisionEngine
 from core.position_monitor import PositionMonitor
+from core.pending_entry import PendingEntry
 from strategies.strategy import Strategy
 
 
@@ -34,6 +37,26 @@ class TradingEngine:
         self._risk_manager = risk_manager
         self._execution = execution
         self._position_monitor = position_monitor
+
+    def recover_runtime_state(self) -> PendingEntry | None:
+        pending = self._execution.recover_pending_entry()
+        self._position_monitor.update()
+        return pending
+
+    def poll_runtime_state(self) -> PendingEntry | None:
+        self._position_monitor.update()
+        return self._execution.refresh_pending_entry()
+
+    def age_pending_entry(
+        self,
+        completed_candle_timestamps: tuple[datetime, ...],
+        *,
+        ttl_candles: int,
+    ) -> PendingEntry | None:
+        return self._execution.age_pending_entry(
+            completed_candle_timestamps,
+            ttl_candles=ttl_candles,
+        )
 
     def process(
         self,

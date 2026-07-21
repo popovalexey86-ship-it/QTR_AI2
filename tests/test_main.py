@@ -9,20 +9,45 @@ import pytest
 import main
 from backtesting.historical_data import HistoricalDataResult
 from core.candle import Candle
+from core.market_data import MarketData
 from core.notification import NotificationError
 
 
 def make_runtime():
     collector = Mock()
-    container = SimpleNamespace(collector=collector, config=Mock())
+    container = SimpleNamespace(
+        collector=collector,
+        config=SimpleNamespace(
+            bybit_testnet=True,
+            pending_entry_ttl_candles=4,
+        ),
+    )
     return container, Mock(), Mock()
+
+
+def completed_market_data(minute: int) -> MarketData:
+    timestamp = datetime(2026, 1, 1, tzinfo=UTC) + timedelta(minutes=minute)
+    return MarketData(
+        symbol="BTCUSDT",
+        timeframe="15",
+        candles=[
+            Candle(
+                timestamp=timestamp,
+                open=100.0,
+                high=101.0,
+                low=99.0,
+                close=100.0,
+                volume=1.0,
+            )
+        ],
+    )
 
 
 def test_live_cycle_logs_startup_and_stops_cleanly_on_keyboard_interrupt(
     monkeypatch,
 ):
     container, engine, notifier = make_runtime()
-    container.collector.collect.side_effect = KeyboardInterrupt
+    container.collector.collect_completed.side_effect = KeyboardInterrupt
     logger = Mock()
     monkeypatch.setattr(main, "logger", logger)
 
@@ -35,11 +60,12 @@ def test_live_cycle_logs_startup_and_stops_cleanly_on_keyboard_interrupt(
     logger.exception.assert_not_called()
     notifier.runtime_started.assert_called_once_with()
     notifier.runtime_stopped.assert_called_once_with()
+    engine.recover_runtime_state.assert_called_once_with()
 
 
 def test_runtime_error_notifies_with_sanitized_message_and_retries(monkeypatch):
     container, engine, notifier = make_runtime()
-    container.collector.collect.side_effect = [
+    container.collector.collect_completed.side_effect = [
         RuntimeError("secret-token=https://private.example"),
         KeyboardInterrupt,
     ]
@@ -61,7 +87,10 @@ def test_runtime_error_notifies_with_sanitized_message_and_retries(monkeypatch):
 
 def test_notification_failures_do_not_terminate_live_cycle(monkeypatch):
     container, engine, notifier = make_runtime()
-    container.collector.collect.side_effect = [ValueError("bad data"), KeyboardInterrupt]
+    container.collector.collect_completed.side_effect = [
+        ValueError("bad data"),
+        KeyboardInterrupt,
+    ]
     notifier.runtime_started.side_effect = NotificationError("failed")
     notifier.runtime_failed.side_effect = NotificationError("failed")
     notifier.runtime_stopped.side_effect = NotificationError("failed")
@@ -77,6 +106,161 @@ def test_notification_failures_do_not_terminate_live_cycle(monkeypatch):
     )
     notifier.runtime_stopped.assert_called_once_with()
     assert logger.error.call_count == 4
+
+
+def test_runtime_recovery_precedes_started_notification(monkeypatch):
+    container, engine, notifier = make_runtime()
+    events: list[str] = []
+    engine.recover_runtime_state.side_effect = lambda: events.append("recover")
+    notifier.runtime_started.side_effect = lambda: events.append("started")
+    container.collector.collect_completed.side_effect = KeyboardInterrupt
+    monkeypatch.setattr(main, "logger", Mock())
+
+    main.run_trading_cycle(container, engine, notifier)
+
+    assert events == ["recover", "started"]
+    engine.recover_runtime_state.assert_called_once_with()
+
+
+def test_runtime_recovery_failure_aborts_before_started_or_collection(monkeypatch):
+    container, engine, notifier = make_runtime()
+    engine.recover_runtime_state.side_effect = RuntimeError(
+        "secret-token=https://private.example"
+    )
+    logger = Mock()
+    monkeypatch.setattr(main, "logger", logger)
+
+    main.run_trading_cycle(container, engine, notifier)
+
+    notifier.runtime_started.assert_not_called()
+    notifier.runtime_stopped.assert_not_called()
+    notifier.runtime_failed.assert_called_once_with(
+        "Runtime recovery failed: RuntimeError"
+    )
+    container.collector.collect_completed.assert_not_called()
+    logged = " ".join(str(item) for item in logger.mock_calls)
+    assert "secret-token" not in logged
+    assert "private.example" not in logged
+
+
+def test_first_completed_collection_polls_and_ages_without_analysis(monkeypatch):
+    container, engine, notifier = make_runtime()
+    baseline = completed_market_data(15)
+    container.collector.collect_completed.side_effect = [
+        baseline,
+        KeyboardInterrupt,
+    ]
+    monkeypatch.setattr(main.time, "sleep", Mock())
+    monkeypatch.setattr(main, "logger", Mock())
+
+    main.run_trading_cycle(container, engine, notifier)
+
+    engine.poll_runtime_state.assert_called_once_with()
+    engine.age_pending_entry.assert_called_once_with(
+        (baseline.last.timestamp,),
+        ttl_candles=4,
+    )
+    engine.process.assert_not_called()
+    container.collector.collect.assert_not_called()
+
+
+def test_unchanged_completed_candle_still_polls_without_reaging(monkeypatch):
+    container, engine, notifier = make_runtime()
+    baseline = completed_market_data(15)
+    container.collector.collect_completed.side_effect = [
+        baseline,
+        baseline,
+        KeyboardInterrupt,
+    ]
+    monkeypatch.setattr(main.time, "sleep", Mock())
+    monkeypatch.setattr(main, "logger", Mock())
+
+    main.run_trading_cycle(container, engine, notifier)
+
+    assert engine.poll_runtime_state.call_count == 2
+    engine.age_pending_entry.assert_called_once()
+    engine.process.assert_not_called()
+
+
+def test_new_candle_call_order_is_poll_then_age_then_process(monkeypatch):
+    container, engine, notifier = make_runtime()
+    baseline = completed_market_data(15)
+    newer = completed_market_data(30)
+    container.collector.collect_completed.side_effect = [
+        baseline,
+        newer,
+        KeyboardInterrupt,
+    ]
+    monkeypatch.setattr(main.time, "sleep", Mock())
+    monkeypatch.setattr(main, "logger", Mock())
+
+    main.run_trading_cycle(container, engine, notifier)
+
+    assert engine.method_calls == [
+        call.recover_runtime_state(),
+        call.poll_runtime_state(),
+        call.age_pending_entry((baseline.last.timestamp,), ttl_candles=4),
+        call.poll_runtime_state(),
+        call.age_pending_entry((newer.last.timestamp,), ttl_candles=4),
+        call.process(newer),
+    ]
+
+
+def test_failed_process_does_not_advance_successful_baseline(monkeypatch):
+    container, engine, notifier = make_runtime()
+    baseline = completed_market_data(15)
+    newer = completed_market_data(30)
+    container.collector.collect_completed.side_effect = [
+        baseline,
+        newer,
+        newer,
+        KeyboardInterrupt,
+    ]
+    engine.process.side_effect = [RuntimeError("sensitive"), None]
+    monkeypatch.setattr(main.time, "sleep", Mock())
+    monkeypatch.setattr(main, "logger", Mock())
+
+    main.run_trading_cycle(container, engine, notifier)
+
+    assert engine.process.call_args_list == [call(newer), call(newer)]
+    assert engine.age_pending_entry.call_count == 3
+
+
+def test_completed_timestamp_regression_fails_closed_for_iteration(monkeypatch):
+    container, engine, notifier = make_runtime()
+    baseline = completed_market_data(30)
+    regressed = completed_market_data(15)
+    container.collector.collect_completed.side_effect = [
+        baseline,
+        regressed,
+        KeyboardInterrupt,
+    ]
+    monkeypatch.setattr(main.time, "sleep", Mock())
+    monkeypatch.setattr(main, "logger", Mock())
+
+    main.run_trading_cycle(container, engine, notifier)
+
+    assert engine.poll_runtime_state.call_count == 2
+    engine.age_pending_entry.assert_called_once()
+    engine.process.assert_not_called()
+    notifier.runtime_failed.assert_called_once_with(
+        "Trading loop error: RuntimeError"
+    )
+
+
+def test_mainnet_live_mode_is_rejected_before_any_runtime_api(monkeypatch):
+    container, engine, notifier = make_runtime()
+    container.config.bybit_testnet = False
+    logger = Mock()
+    monkeypatch.setattr(main, "logger", logger)
+
+    with pytest.raises(main.LiveTestnetRequiredError, match="Testnet"):
+        main.run_trading_cycle(container, engine, notifier)
+
+    engine.recover_runtime_state.assert_not_called()
+    container.collector.collect_completed.assert_not_called()
+    notifier.runtime_started.assert_not_called()
+    logger.info.assert_not_called()
 
 
 def test_main_test_telegram_path_remains_separate_from_live_cycle(monkeypatch):

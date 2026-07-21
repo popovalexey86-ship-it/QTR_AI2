@@ -127,6 +127,18 @@ def test_cancel_requested_state_round_trips(tmp_path: Path) -> None:
     assert loaded.pending_entry.status == PendingEntryStatus.CANCEL_REQUESTED
 
 
+def test_expiry_requested_marker_round_trips(tmp_path: Path) -> None:
+    store = BybitPendingEntryStore(tmp_path / "state.json")
+    state = _state(status=PendingEntryStatus.WORKING)
+    expiring_entry = replace(state.pending_entry, expiry_requested=True)
+    store.save(replace(state, pending_entry=expiring_entry))
+
+    loaded = store.load()
+
+    assert loaded is not None
+    assert loaded.pending_entry.expiry_requested is True
+
+
 def test_clear_is_idempotent(tmp_path: Path) -> None:
     path = tmp_path / "state.json"
     store = BybitPendingEntryStore(path)

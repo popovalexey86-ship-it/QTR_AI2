@@ -98,6 +98,26 @@ class Execution:
     def get_pending_entry(self) -> PendingEntry | None:
         return self._broker.get_pending_entry()
 
+    def recover_pending_entry(self) -> PendingEntry | None:
+        recovered = self._broker.recover_pending_entry()
+        if recovered is not None:
+            self.register_recovered_order_link_id(recovered.order_link_id)
+        return recovered
+
+    def refresh_pending_entry(self) -> PendingEntry | None:
+        return self._broker.refresh_pending_entry()
+
+    def age_pending_entry(
+        self,
+        completed_candle_timestamps: tuple[datetime, ...],
+        *,
+        ttl_candles: int,
+    ) -> PendingEntry | None:
+        return self._broker.age_pending_entry(
+            completed_candle_timestamps,
+            ttl_candles=ttl_candles,
+        )
+
     def get_entry_order(
         self,
         order_link_id: str,
