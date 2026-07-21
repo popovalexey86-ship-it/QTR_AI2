@@ -1,5 +1,12 @@
 from infrastructure.bybit.bybit_client import BybitClient
+from infrastructure.config import Config
 
-client = BybitClient()
 
-print(client.get_server_time())
+def main() -> None:
+    client = BybitClient(Config.load())
+
+    print(client.get_server_time())
+
+
+if __name__ == "__main__":
+    main()

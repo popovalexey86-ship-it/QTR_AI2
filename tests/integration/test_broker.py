@@ -27,13 +27,15 @@ def main() -> None:
         trend=Trend.BULLISH,
         entry=entry,
         stop_loss=stop_loss,
-        take_profit=take_profit,
     )
 
     request = TradeRequest(
         symbol="BTCUSDT",
         setup=setup,
         decision=Decision.BUY,
+        entry=entry,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
         volume=0.001,
     )
 
