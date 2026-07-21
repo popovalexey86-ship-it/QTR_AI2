@@ -9,11 +9,16 @@ class BybitClient:
         self,
         config: Config,
     ):
+        self._is_testnet = config.bybit_testnet
         self._session = HTTP(
-            testnet=config.bybit_testnet,
+            testnet=self._is_testnet,
             api_key=config.bybit_api_key,
             api_secret=config.bybit_api_secret,
         )
+
+    @property
+    def is_testnet(self) -> bool:
+        return self._is_testnet
 
     def get_server_time(self) -> dict:
         return self._session.get_server_time()
@@ -59,3 +64,43 @@ class BybitClient:
             symbol=symbol,
             limit=limit,
         )
+
+    def get_open_orders(
+        self,
+        category: str,
+        symbol: str,
+        order_link_id: str,
+    ) -> dict:
+        return self._session.get_open_orders(
+            category=category,
+            symbol=symbol,
+            orderLinkId=order_link_id,
+        )
+
+    def get_order_history(
+        self,
+        category: str,
+        symbol: str,
+        order_link_id: str,
+    ) -> dict:
+        return self._session.get_order_history(
+            category=category,
+            symbol=symbol,
+            orderLinkId=order_link_id,
+        )
+
+    def cancel_order(
+        self,
+        category: str,
+        symbol: str,
+        order_link_id: str,
+        order_id: str | None = None,
+    ) -> dict:
+        parameters = {
+            "category": category,
+            "symbol": symbol,
+            "orderLinkId": order_link_id,
+        }
+        if order_id is not None:
+            parameters["orderId"] = order_id
+        return self._session.cancel_order(**parameters)
