@@ -67,6 +67,9 @@ class TelegramNotifier:
             )
         )
         self._send(message)
+        
+    def test_connection(self) -> None:
+        self._send("QTR_AI2 Telegram connection test")
 
     def _send(self, message: str) -> None:
         try:
