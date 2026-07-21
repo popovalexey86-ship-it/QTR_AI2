@@ -29,6 +29,18 @@ class TelegramNotifier:
         self._timeout = timeout
         self._session = session or requests.Session()
 
+    def runtime_started(self) -> None:
+        self._send("🚀 QTR_AI2 Bot Started")
+
+    def runtime_stopped(self) -> None:
+        self._send("🛑 QTR_AI2 Bot Stopped")
+
+    def runtime_failed(self, error_message: str) -> None:
+        self._send(
+            "⚠️ QTR_AI2 Critical Runtime Error\n"
+            f"Error: {error_message}"
+        )
+
     def position_opened(self, position: Position) -> None:
         message = "\n".join(
             (
@@ -67,7 +79,7 @@ class TelegramNotifier:
             )
         )
         self._send(message)
-        
+
     def test_connection(self) -> None:
         self._send("QTR_AI2 Telegram connection test")
 

@@ -1,4 +1,5 @@
 from infrastructure.container import Container
+from infrastructure.config import Config
 
 from core.analysis_engine import AnalysisEngine
 
@@ -13,6 +14,7 @@ from core.setup_engine import SetupEngine
 from core.decision_engine import DecisionEngine
 
 from core.execution import Execution
+from core.notification import NotificationPort
 from core.position_monitor import PositionMonitor
 from core.risk_manager import RiskManager
 from core.trade_statistics import TradeStatistics
@@ -22,6 +24,16 @@ from infrastructure.telegram_notifier import TelegramNotifier
 
 from engine.trading_engine import TradingEngine
 from strategies.smc_strategy import SMCStrategy
+
+
+def create_notifier(config: Config) -> NotificationPort:
+    if config.telegram_enabled:
+        return TelegramNotifier(
+            bot_token=config.telegram_bot_token or "",
+            chat_id=config.telegram_chat_id or "",
+        )
+
+    return NullNotifier()
 
 
 def create_trading_engine(
@@ -72,13 +84,7 @@ def create_trading_engine(
     for trade in journal.trades:
         statistics.add_trade(trade)
 
-    if container.config.telegram_enabled:
-        notifier = TelegramNotifier(
-            bot_token=container.config.telegram_bot_token or "",
-            chat_id=container.config.telegram_chat_id or "",
-        )
-    else:
-        notifier = NullNotifier()
+    notifier = create_notifier(container.config)
 
     position_monitor = PositionMonitor(
         execution=execution,
