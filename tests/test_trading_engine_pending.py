@@ -18,6 +18,8 @@ from core.trade_statistics import TradeStatistics
 from core.trend import Trend
 from engine.trading_engine import TradingEngine
 from infrastructure.null_notifier import NullNotifier
+from core.notification import NotificationError
+from tests.test_telegram_notifier import make_pending_event
 from strategies.strategy import Strategy
 
 
@@ -92,7 +94,11 @@ def engine_parts(
     engine = TradingEngine(
         strategy=strategy,
         decision_engine=DecisionEngine(),
-        risk_manager=RiskManager(risk_reward=2.0),
+        risk_manager=RiskManager(
+            risk_reward=2.0,
+            symbol="BTCUSDT",
+            volume=0.01,
+        ),
         execution=execution,
         position_monitor=monitor,
     )
@@ -146,7 +152,11 @@ def test_open_position_suppresses_pending_submission() -> None:
     engine, _, broker = engine_parts(strategy)
     broker.update_market(market_data(0).last)
     broker.open_position(
-        RiskManager(risk_reward=2.0).build(setup(), DecisionEngine().decide(setup()))
+        RiskManager(
+            risk_reward=2.0,
+            symbol="BTCUSDT",
+            volume=0.01,
+        ).build(setup(), DecisionEngine().decide(setup()))
     )
 
     engine.process(market_data(1))
@@ -269,3 +279,36 @@ def test_trading_engine_age_facade_delegates_without_bybit_dependency() -> None:
         timestamps,
         ttl_candles=4,
     )
+
+
+def test_pending_notification_failure_does_not_block_later_events() -> None:
+    execution = Mock()
+    expected_pending = Mock()
+    execution.refresh_pending_entry.return_value = expected_pending
+    events = (
+        make_pending_event(PendingEntryStatus.WORKING),
+        make_pending_event(PendingEntryStatus.CANCEL_REQUESTED),
+    )
+    execution.drain_pending_entry_events.return_value = events
+    notifier = Mock()
+    notifier.pending_entry_event.side_effect = [
+        NotificationError("secret transport details"),
+        None,
+    ]
+    engine = TradingEngine(
+        strategy=Mock(),
+        decision_engine=Mock(),
+        risk_manager=Mock(),
+        execution=execution,
+        position_monitor=Mock(),
+        notifier=notifier,
+    )
+
+    result = engine.poll_runtime_state()
+
+    assert result is expected_pending
+    assert notifier.pending_entry_event.call_args_list == [
+        call(events[0]),
+        call(events[1]),
+    ]
+    execution.refresh_pending_entry.assert_called_once_with()

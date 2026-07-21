@@ -139,3 +139,66 @@ def test_config_repr_excludes_bybit_credentials(tmp_path):
 
     assert "sensitive-key" not in repr(config)
     assert "sensitive-secret" not in repr(config)
+
+
+def test_trade_parameter_defaults(monkeypatch):
+    monkeypatch.setattr("infrastructure.config.load_dotenv", lambda: None)
+    for name in ("TRADE_SYMBOL", "TRADE_INTERVAL", "TRADE_VOLUME"):
+        monkeypatch.delenv(name, raising=False)
+
+    config = Config.load()
+
+    assert config.trade_symbol == "BTCUSDT"
+    assert config.trade_interval == "15"
+    assert config.trade_volume == 0.01
+
+
+def test_trade_parameter_environment_overrides(monkeypatch):
+    monkeypatch.setenv("TRADE_SYMBOL", " ethusdt ")
+    monkeypatch.setenv("TRADE_INTERVAL", "5")
+    monkeypatch.setenv("TRADE_VOLUME", "0.25")
+
+    config = Config.load()
+
+    assert config.trade_symbol == "ETHUSDT"
+    assert config.trade_interval == "5"
+    assert config.trade_volume == 0.25
+
+
+@pytest.mark.parametrize("symbol", ["", "   ", "BTC/USDT", "БTCUSDT"])
+def test_invalid_trade_symbol_is_rejected(tmp_path, symbol):
+    with pytest.raises(ValueError, match="ASCII-safe"):
+        Config(
+            bybit_api_key="key",
+            bybit_api_secret="secret",
+            bybit_testnet=True,
+            trade_journal_path=tmp_path / "trades.csv",
+            trade_symbol=symbol,
+        )
+
+
+@pytest.mark.parametrize("interval", ["", "0", "-1", "D", "15m"])
+def test_invalid_trade_interval_is_rejected(tmp_path, interval):
+    with pytest.raises(ValueError, match="numeric-minute"):
+        Config(
+            bybit_api_key="key",
+            bybit_api_secret="secret",
+            bybit_testnet=True,
+            trade_journal_path=tmp_path / "trades.csv",
+            trade_interval=interval,
+        )
+
+
+@pytest.mark.parametrize(
+    "volume",
+    [0.0, -1.0, float("nan"), float("inf"), True],
+)
+def test_invalid_trade_volume_is_rejected(tmp_path, volume):
+    with pytest.raises(ValueError, match="finite and positive"):
+        Config(
+            bybit_api_key="key",
+            bybit_api_secret="secret",
+            bybit_testnet=True,
+            trade_journal_path=tmp_path / "trades.csv",
+            trade_volume=volume,
+        )

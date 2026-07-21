@@ -50,3 +50,25 @@ def test_container_injects_pending_dependencies_without_api_request(
     assert container.client.is_testnet is testnet
     assert session.mock_calls == []
     assert not state_path.exists()
+
+
+def test_container_uses_configured_symbol_and_interval(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(client_module, "HTTP", Mock(return_value=Mock()))
+    config = Config(
+        bybit_api_key="key",
+        bybit_api_secret="secret",
+        bybit_testnet=True,
+        trade_journal_path=tmp_path / "trades.csv",
+        trade_symbol="ETHUSDT",
+        trade_interval="5",
+        trade_volume=0.25,
+    )
+
+    container = Container(config)
+
+    assert container.collector._symbol == "ETHUSDT"
+    assert container.collector._interval == "5"
+    assert container.broker._symbol == "ETHUSDT"

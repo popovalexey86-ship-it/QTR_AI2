@@ -3,6 +3,7 @@ from datetime import datetime
 
 from core.entry_order import EntryOrderAcknowledgement, EntryOrderSnapshot
 from core.pending_entry import PendingEntry
+from core.pending_entry_event import PendingEntryEvent
 from core.trade import Trade
 from core.position import Position
 from core.trade_request import TradeRequest
@@ -76,3 +77,6 @@ class Broker(ABC):
         ttl_candles: int,
     ) -> PendingEntry | None:
         return self.get_pending_entry()
+
+    def drain_pending_entry_events(self) -> tuple[PendingEntryEvent, ...]:
+        return ()

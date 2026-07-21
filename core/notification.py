@@ -3,6 +3,7 @@ from typing import Protocol
 from core.position import Position
 from core.trade import Trade
 from core.trade_statistics import TradeStatistics
+from core.pending_entry_event import PendingEntryEvent
 
 
 class NotificationError(RuntimeError):
@@ -17,6 +18,8 @@ class NotificationPort(Protocol):
     def runtime_failed(self, error_message: str) -> None: ...
 
     def position_opened(self, position: Position) -> None: ...
+
+    def pending_entry_event(self, event: PendingEntryEvent) -> None: ...
 
     def trade_closed(
         self,

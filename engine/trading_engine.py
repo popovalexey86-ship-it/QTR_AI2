@@ -10,6 +10,7 @@ from core.risk_manager import RiskManager
 from core.decision_engine import DecisionEngine
 from core.position_monitor import PositionMonitor
 from core.pending_entry import PendingEntry
+from core.notification import NotificationError, NotificationPort
 from strategies.strategy import Strategy
 
 
@@ -31,21 +32,26 @@ class TradingEngine:
         risk_manager: RiskManager,
         execution: Execution,
         position_monitor: PositionMonitor,
+        notifier: NotificationPort | None = None,
     ):
         self._strategy = strategy
         self._decision_engine = decision_engine
         self._risk_manager = risk_manager
         self._execution = execution
         self._position_monitor = position_monitor
+        self._notifier = notifier
 
     def recover_runtime_state(self) -> PendingEntry | None:
         pending = self._execution.recover_pending_entry()
         self._position_monitor.update()
+        self._deliver_pending_entry_events()
         return pending
 
     def poll_runtime_state(self) -> PendingEntry | None:
         self._position_monitor.update()
-        return self._execution.refresh_pending_entry()
+        pending = self._execution.refresh_pending_entry()
+        self._deliver_pending_entry_events()
+        return pending
 
     def age_pending_entry(
         self,
@@ -53,10 +59,27 @@ class TradingEngine:
         *,
         ttl_candles: int,
     ) -> PendingEntry | None:
-        return self._execution.age_pending_entry(
+        pending = self._execution.age_pending_entry(
             completed_candle_timestamps,
             ttl_candles=ttl_candles,
         )
+        self._deliver_pending_entry_events()
+        return pending
+
+    def _deliver_pending_entry_events(self) -> None:
+        events = self._execution.drain_pending_entry_events()
+        if self._notifier is None:
+            return
+        for event in events:
+            try:
+                self._notifier.pending_entry_event(event)
+            except NotificationError as error:
+                logger.error(
+                    "Pending-entry notification failed. "
+                    "OrderLinkId=%s Error=%s",
+                    event.order_link_id,
+                    type(error).__name__,
+                )
 
     def process(
         self,
@@ -123,5 +146,6 @@ class TradingEngine:
             pending.order_link_id,
             pending.exchange_order_id,
         )
+        self._deliver_pending_entry_events()
 
         logger.info("Trading cycle completed.")

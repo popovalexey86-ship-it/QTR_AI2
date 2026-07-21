@@ -12,6 +12,7 @@ from core.pending_entry import (
     build_order_link_id,
     build_setup_key,
 )
+from core.pending_entry_event import PendingEntryEvent
 from core.position import Position
 from core.trade import Trade
 from core.trade_request import TradeRequest
@@ -117,6 +118,9 @@ class Execution:
             completed_candle_timestamps,
             ttl_candles=ttl_candles,
         )
+
+    def drain_pending_entry_events(self) -> tuple[PendingEntryEvent, ...]:
+        return self._broker.drain_pending_entry_events()
 
     def get_entry_order(
         self,

@@ -26,6 +26,8 @@ def test_bootstrap_creates_trading_engine_with_position_monitor(tmp_path):
             telegram_enabled=False,
             telegram_bot_token=None,
             telegram_chat_id=None,
+            trade_symbol="BTCUSDT",
+            trade_volume=0.01,
         ),
     )
 
@@ -125,6 +127,8 @@ def test_bootstrap_hydrates_statistics_from_csv_journal(tmp_path):
             telegram_enabled=False,
             telegram_bot_token=None,
             telegram_chat_id=None,
+            trade_symbol="BTCUSDT",
+            trade_volume=0.01,
         ),
     )
 
@@ -141,6 +145,8 @@ def test_bootstrap_selects_telegram_notifier_without_sending_network_request(tmp
             telegram_enabled=True,
             telegram_bot_token="test-token",
             telegram_chat_id="test-chat",
+            trade_symbol="BTCUSDT",
+            trade_volume=0.01,
         ),
     )
 

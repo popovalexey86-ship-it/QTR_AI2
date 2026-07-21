@@ -9,16 +9,65 @@ from core.notification import NotificationError, NotificationPort
 from engine.trading_engine import TradingEngine
 from infrastructure.container import Container
 from infrastructure.telegram_notifier import TelegramNotifier
+from infrastructure.config import Config
 
 
 class LiveTestnetRequiredError(RuntimeError):
     """Raised when the MVP live loop is requested outside Bybit Testnet."""
 
 
+class LiveConfigurationError(RuntimeError):
+    """Raised when live Testnet configuration is incomplete or unsafe."""
+
+
 def build_trading_engine() -> tuple[Container, TradingEngine]:
     """Build application dependencies without making a Bybit API call."""
     container = Container()
     return container, create_trading_engine(container)
+
+
+def validate_live_configuration(config: Config) -> None:
+    if config.bybit_testnet is not True:
+        raise LiveConfigurationError("Bybit Testnet must be enabled.")
+    if not config.bybit_api_key.strip() or not config.bybit_api_secret.strip():
+        raise LiveConfigurationError(
+            "Bybit API credentials are required for Testnet live mode."
+        )
+    try:
+        config.bybit_pending_entry_state_path.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+    except OSError:
+        raise LiveConfigurationError(
+            "Pending-state parent directory cannot be prepared."
+        ) from None
+
+
+def check_live_configuration() -> None:
+    config = Config.load()
+    validate_live_configuration(config)
+    container = Container(config)
+    create_trading_engine(container)
+    print("Mode: Bybit Testnet")
+    print("Category: linear")
+    print(f"Symbol: {config.trade_symbol}")
+    print(f"Interval: {config.trade_interval}")
+    print(f"Volume: {config.trade_volume}")
+    print(f"TTL: {config.pending_entry_ttl_candles}")
+    print(f"Pending-state path: {config.bybit_pending_entry_state_path}")
+    print(f"Telegram: {'enabled' if config.telegram_enabled else 'disabled'}")
+    print("Configuration valid")
+
+
+def testnet_preflight() -> None:
+    from infrastructure.bybit.bybit_preflight import run_bybit_testnet_preflight
+
+    config = Config.load()
+    validate_live_configuration(config)
+    container = Container(config)
+    report = run_bybit_testnet_preflight(container)
+    print(report.summary())
 
 
 def _notify_runtime_event(event: str, callback: Callable[[], None]) -> None:
@@ -38,6 +87,7 @@ def run_trading_cycle(
         raise LiveTestnetRequiredError(
             "Live trading is restricted to Bybit Testnet."
         )
+    validate_live_configuration(container.config)
 
     if notifier is None:
         notifier = create_notifier(container.config)
@@ -204,7 +254,31 @@ def main(
     refresh_cache: bool = False,
     history_window: int = 500,
     verbose_backtest: bool = False,
+    check_live_config: bool = False,
+    testnet_preflight_mode: bool = False,
 ) -> None:
+    selected_modes = sum(
+        bool(value)
+        for value in (
+            run_loop,
+            test_telegram,
+            backtest_sample,
+            backtest_bybit,
+            check_live_config,
+            testnet_preflight_mode,
+        )
+    )
+    if selected_modes > 1:
+        raise ValueError("CLI modes are mutually exclusive.")
+
+    if check_live_config:
+        check_live_configuration()
+        return
+
+    if testnet_preflight_mode:
+        testnet_preflight()
+        return
+
     if backtest_sample:
         run_sample_backtest()
         return
@@ -240,29 +314,40 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    mode_group = parser.add_mutually_exclusive_group()
 
-    parser.add_argument(
+    mode_group.add_argument(
         "--run-live",
         action="store_true",
         help="Start the live trading cycle after assembling the application.",
     )
 
-    parser.add_argument(
+    mode_group.add_argument(
         "--test-telegram",
         action="store_true",
         help="Send a Telegram test notification and exit.",
     )
 
-    parser.add_argument(
+    mode_group.add_argument(
         "--backtest-sample",
         action="store_true",
         help="Run the deterministic in-memory backtest sample and exit.",
     )
 
-    parser.add_argument(
+    mode_group.add_argument(
         "--backtest-bybit",
         action="store_true",
         help="Run a cached backtest using public Bybit historical candles.",
+    )
+    mode_group.add_argument(
+        "--check-live-config",
+        action="store_true",
+        help="Validate live Testnet configuration without network requests.",
+    )
+    mode_group.add_argument(
+        "--testnet-preflight",
+        action="store_true",
+        help="Run read-only Bybit Testnet readiness checks.",
     )
     parser.add_argument("--symbol")
     parser.add_argument("--interval")
@@ -297,4 +382,6 @@ if __name__ == "__main__":
         refresh_cache=arguments.refresh_cache,
         history_window=arguments.history_window,
         verbose_backtest=arguments.verbose_backtest,
+        check_live_config=arguments.check_live_config,
+        testnet_preflight_mode=arguments.testnet_preflight,
     )

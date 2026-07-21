@@ -31,8 +31,8 @@ class Container:
         self.collector = BybitCollector(
             client=self.client,
             category="linear",
-            symbol="BTCUSDT",
-            interval="15",
+            symbol=self.config.trade_symbol,
+            interval=self.config.trade_interval,
         )
 
         self.broker = BybitBroker(
@@ -43,5 +43,5 @@ class Container:
             entry_snapshot_mapper=self.entry_snapshot_mapper,
             pending_entry_store=self.pending_entry_store,
             category="linear",
-            symbol="BTCUSDT",
+            symbol=self.config.trade_symbol,
         )

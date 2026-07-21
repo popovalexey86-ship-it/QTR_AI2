@@ -26,7 +26,11 @@ def create_backtest_runner(symbol: str) -> BacktestRunner:
         symbol=symbol,
         strategy=SMCStrategy(analysis_engine),
         decision_engine=DecisionEngine(),
-        risk_manager=RiskManager(risk_reward=2.0),
+        risk_manager=RiskManager(
+            risk_reward=2.0,
+            symbol=symbol,
+            volume=0.01,
+        ),
     )
 
 

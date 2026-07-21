@@ -20,6 +20,9 @@ def make_runtime():
         config=SimpleNamespace(
             bybit_testnet=True,
             pending_entry_ttl_candles=4,
+            bybit_api_key="test-key",
+            bybit_api_secret="test-secret",
+            bybit_pending_entry_state_path=Path("data/test-pending.json"),
         ),
     )
     return container, Mock(), Mock()
@@ -272,10 +275,15 @@ def test_main_test_telegram_path_remains_separate_from_live_cycle(monkeypatch):
     monkeypatch.setattr(main, "send_telegram_test", send_test)
     monkeypatch.setattr(main, "run_trading_cycle", run_cycle)
 
-    main.main(run_loop=True, test_telegram=True)
+    main.main(test_telegram=True)
 
     send_test.assert_called_once_with(container)
     run_cycle.assert_not_called()
+
+
+def test_programmatic_cli_modes_are_mutually_exclusive():
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        main.main(run_loop=True, test_telegram=True)
 
 
 def test_send_telegram_test_uses_public_connection_method(monkeypatch):

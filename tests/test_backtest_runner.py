@@ -96,7 +96,11 @@ def runner(
         symbol=symbol,
         strategy=strategy,
         decision_engine=DecisionEngine(),
-        risk_manager=RiskManager(risk_reward=2.0),
+        risk_manager=RiskManager(
+            risk_reward=2.0,
+            symbol="BTCUSDT",
+            volume=0.01,
+        ),
         pending_entry_ttl_candles=pending_entry_ttl_candles,
     )
 

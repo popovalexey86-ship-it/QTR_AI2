@@ -1,6 +1,7 @@
 from core.position import Position
 from core.trade import Trade
 from core.trade_statistics import TradeStatistics
+from core.pending_entry_event import PendingEntryEvent
 
 
 class NullNotifier:
@@ -14,6 +15,9 @@ class NullNotifier:
         pass
 
     def position_opened(self, position: Position) -> None:
+        pass
+
+    def pending_entry_event(self, event: PendingEntryEvent) -> None:
         pass
 
     def trade_closed(

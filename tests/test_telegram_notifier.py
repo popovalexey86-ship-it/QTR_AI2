@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import Mock
 
 import pytest
@@ -9,6 +9,8 @@ from core.notification import NotificationError
 from core.position import Position
 from core.trade import Trade
 from core.trade_statistics import TradeStatistics
+from core.pending_entry import PendingEntryStatus
+from core.pending_entry_event import PendingEntryEvent, PendingEntryEventKind
 from infrastructure.telegram_notifier import TelegramNotifier
 
 
@@ -41,6 +43,32 @@ def make_notifier(response=None, timeout=(3.05, 5.0)):
     session.post.return_value = response
     notifier = TelegramNotifier(TOKEN, CHAT_ID, timeout=timeout, session=session)
     return notifier, session, response
+
+
+def make_pending_event(
+    status: PendingEntryStatus,
+    *,
+    kind: PendingEntryEventKind = PendingEntryEventKind.STATUS_CHANGED,
+    filled_volume: float = 0.0,
+    average_fill_price: float | None = None,
+    exchange_order_id: str | None = "exchange-1",
+    rejection_reason: str | None = None,
+) -> PendingEntryEvent:
+    return PendingEntryEvent(
+        kind=kind,
+        order_link_id="QTR-safe-order",
+        exchange_order_id=exchange_order_id,
+        symbol="BTCUSDT",
+        decision=Decision.BUY,
+        status=status,
+        previous_status=PendingEntryStatus.SUBMITTED,
+        entry=100.0,
+        requested_volume=1.0,
+        filled_volume=filled_volume,
+        average_fill_price=average_fill_price,
+        rejection_reason=rejection_reason,
+        signal_timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+    )
 
 
 def test_constructor_does_not_make_http_request():
@@ -152,3 +180,104 @@ def test_malformed_json_raises_notification_error():
     notifier, _, _ = make_notifier(response=response)
     with pytest.raises(NotificationError):
         notifier.position_opened(make_position())
+
+
+@pytest.mark.parametrize(
+    ("event", "expected_title"),
+    [
+        (
+            make_pending_event(
+                PendingEntryStatus.SUBMITTED,
+                kind=PendingEntryEventKind.SUBMITTED,
+            ),
+            "Pending Entry Submitted",
+        ),
+        (
+            make_pending_event(
+                PendingEntryStatus.WORKING,
+                kind=PendingEntryEventKind.RECOVERED,
+            ),
+            "Pending Entry Recovered",
+        ),
+        (make_pending_event(PendingEntryStatus.WORKING), "Pending Entry Working"),
+        (
+            make_pending_event(
+                PendingEntryStatus.PARTIALLY_FILLED,
+                filled_volume=0.4,
+                average_fill_price=99.5,
+            ),
+            "Pending Entry Partially Filled",
+        ),
+        (
+            make_pending_event(PendingEntryStatus.CANCEL_REQUESTED),
+            "Pending Entry Cancellation Requested",
+        ),
+        (
+            make_pending_event(
+                PendingEntryStatus.FILLED,
+                kind=PendingEntryEventKind.TERMINAL,
+                filled_volume=1.0,
+                average_fill_price=100.0,
+            ),
+            "Pending Entry Filled",
+        ),
+        (
+            make_pending_event(
+                PendingEntryStatus.CANCELLED,
+                kind=PendingEntryEventKind.TERMINAL,
+            ),
+            "Pending Entry Cancelled",
+        ),
+        (
+            make_pending_event(
+                PendingEntryStatus.EXPIRED,
+                kind=PendingEntryEventKind.TERMINAL,
+            ),
+            "Pending Entry Expired",
+        ),
+        (
+            make_pending_event(
+                PendingEntryStatus.REJECTED,
+                kind=PendingEntryEventKind.TERMINAL,
+                rejection_reason="safe reason",
+            ),
+            "Pending Entry Rejected",
+        ),
+    ],
+)
+def test_pending_entry_lifecycle_message_formats(
+    event: PendingEntryEvent,
+    expected_title: str,
+) -> None:
+    notifier, session, _ = make_notifier()
+
+    notifier.pending_entry_event(event)
+
+    message = session.post.call_args.kwargs["json"]["text"]
+    assert message.startswith(expected_title)
+    assert "Symbol: BTCUSDT" in message
+    assert "Direction: BUY" in message
+    assert "OrderLinkId: QTR-safe-order" in message
+    assert TOKEN not in message
+    assert "http" not in message.lower()
+    if event.filled_volume > 0:
+        assert f"Filled volume: {event.filled_volume}" in message
+    else:
+        assert "Filled volume:" not in message
+    if event.rejection_reason is not None:
+        assert "Reason: safe reason" in message
+
+
+def test_pending_message_omits_absent_optional_fields() -> None:
+    notifier, session, _ = make_notifier()
+    event = make_pending_event(
+        PendingEntryStatus.WORKING,
+        exchange_order_id=None,
+    )
+
+    notifier.pending_entry_event(event)
+
+    message = session.post.call_args.kwargs["json"]["text"]
+    assert "Exchange order ID:" not in message
+    assert "Average fill price:" not in message
+    assert "Reason:" not in message

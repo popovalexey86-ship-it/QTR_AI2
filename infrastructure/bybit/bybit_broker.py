@@ -14,6 +14,7 @@ from core.pending_entry import (
     PendingEntryStatus,
     validate_pending_entry_transition,
 )
+from core.pending_entry_event import PendingEntryEvent, PendingEntryEventKind
 from core.position import Position
 from core.trade import Trade
 from core.trade_request import TradeRequest
@@ -80,6 +81,15 @@ class BybitBroker(Broker):
         self._entry_orders: dict[str, PendingEntry] = {}
         self._cancel_requested_order_ids: set[str] = set()
         self._last_aged_candle_timestamp: datetime | None = None
+        self._pending_entry_events: list[PendingEntryEvent] = []
+        self._recovering = False
+        self._recovery_event_order_ids: set[str] = set()
+        self._submission_event_order_ids: set[str] = set()
+        self._last_reconciled_terminal: tuple[
+            PendingEntry,
+            PendingEntryStatus,
+            str | None,
+        ] | None = None
 
     def submit_entry(
         self,
@@ -109,6 +119,13 @@ class BybitBroker(Broker):
                     "The active order link ID has conflicting content."
                 )
             self._persist_pending_entry(active)
+            if order_link_id not in self._submission_event_order_ids:
+                self._queue_pending_event(
+                    active,
+                    kind=PendingEntryEventKind.SUBMITTED,
+                    previous_status=None,
+                )
+                self._submission_event_order_ids.add(order_link_id)
             return EntryOrderAcknowledgement(
                 order_link_id=active.order_link_id,
                 exchange_order_id=active.exchange_order_id,
@@ -170,6 +187,12 @@ class BybitBroker(Broker):
         self._pending_entry = pending
         self._entry_orders[order_link_id] = pending
         self._persist_pending_entry(pending)
+        self._queue_pending_event(
+            pending,
+            kind=PendingEntryEventKind.SUBMITTED,
+            previous_status=None,
+        )
+        self._submission_event_order_ids.add(order_link_id)
         return EntryOrderAcknowledgement(
             order_link_id=order_link_id,
             exchange_order_id=exchange_order_id,
@@ -312,8 +335,43 @@ class BybitBroker(Broker):
         self._entry_orders[order_link_id] = cancel_requested
         self._cancel_requested_order_ids.add(order_link_id)
         self._persist_pending_entry(cancel_requested)
+        self._queue_pending_event(
+            cancel_requested,
+            kind=PendingEntryEventKind.STATUS_CHANGED,
+            previous_status=active.status,
+        )
 
     def recover_pending_entry(self) -> PendingEntry | None:
+        self._recovering = True
+        self._last_reconciled_terminal = None
+        try:
+            recovered = self._recover_pending_entry()
+        finally:
+            self._recovering = False
+
+        if recovered is not None:
+            if recovered.order_link_id not in self._recovery_event_order_ids:
+                self._queue_pending_event(
+                    recovered,
+                    kind=PendingEntryEventKind.RECOVERED,
+                    previous_status=None,
+                )
+                self._recovery_event_order_ids.add(recovered.order_link_id)
+        elif self._last_reconciled_terminal is not None:
+            terminal, previous_status, rejection_reason = (
+                self._last_reconciled_terminal
+            )
+            if terminal.order_link_id not in self._recovery_event_order_ids:
+                self._queue_pending_event(
+                    terminal,
+                    kind=PendingEntryEventKind.TERMINAL,
+                    previous_status=previous_status,
+                    rejection_reason=rejection_reason,
+                )
+                self._recovery_event_order_ids.add(terminal.order_link_id)
+        return recovered
+
+    def _recover_pending_entry(self) -> PendingEntry | None:
         if self._pending_entry_store is None:
             raise BybitPendingEntryRecoveryError(
                 "Pending-entry recovery requires durable storage."
@@ -508,6 +566,44 @@ class BybitBroker(Broker):
 
     def get_pending_entry(self) -> PendingEntry | None:
         return self._pending_entry
+
+    def drain_pending_entry_events(self) -> tuple[PendingEntryEvent, ...]:
+        events = tuple(self._pending_entry_events)
+        self._pending_entry_events.clear()
+        return events
+
+    def inspect_active_order_counts(self) -> tuple[int, int]:
+        active_orders = self._list_active_exchange_orders()
+        owned, foreign = _classify_active_orders(active_orders)
+        return len(owned), len(foreign)
+
+    def _queue_pending_event(
+        self,
+        entry: PendingEntry,
+        *,
+        kind: PendingEntryEventKind,
+        previous_status: PendingEntryStatus | None,
+        rejection_reason: str | None = None,
+    ) -> None:
+        if self._recovering:
+            return
+        self._pending_entry_events.append(
+            PendingEntryEvent(
+                kind=kind,
+                order_link_id=entry.order_link_id,
+                exchange_order_id=entry.exchange_order_id,
+                symbol=self._symbol,
+                decision=entry.request.decision,
+                status=entry.status,
+                previous_status=previous_status,
+                entry=entry.request.entry,
+                requested_volume=entry.request.volume,
+                filled_volume=entry.filled_volume,
+                average_fill_price=entry.average_fill_price,
+                rejection_reason=rejection_reason,
+                signal_timestamp=entry.signal_timestamp,
+            )
+        )
 
     def _restore_pending_entry(
         self,
@@ -721,15 +817,33 @@ class BybitBroker(Broker):
         self._pending_entry = updated
 
         if updated.status in _TERMINAL_ENTRY_STATUSES:
+            terminal_previous_status = transition_active.status
             self._pending_entry = None
             try:
                 self._clear_persisted_pending_entry()
             except BybitPendingEntryPersistenceError:
                 self._pending_entry = updated
                 raise
+            self._last_reconciled_terminal = (
+                updated,
+                terminal_previous_status,
+                effective_snapshot.rejection_reason,
+            )
+            self._queue_pending_event(
+                updated,
+                kind=PendingEntryEventKind.TERMINAL,
+                previous_status=terminal_previous_status,
+                rejection_reason=effective_snapshot.rejection_reason,
+            )
             return effective_snapshot
 
         self._persist_pending_entry(updated)
+        if updated != active:
+            self._queue_pending_event(
+                updated,
+                kind=PendingEntryEventKind.STATUS_CHANGED,
+                previous_status=active.status,
+            )
         if effective_snapshot.status == PendingEntryStatus.PARTIALLY_FILLED:
             self.cancel_entry(active.order_link_id)
         return effective_snapshot

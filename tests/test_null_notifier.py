@@ -5,6 +5,8 @@ from core.position import Position
 from core.trade import Trade
 from core.trade_statistics import TradeStatistics
 from infrastructure.null_notifier import NullNotifier
+from tests.test_telegram_notifier import make_pending_event
+from core.pending_entry import PendingEntryStatus
 
 
 def test_null_notifier_accepts_open_and_closed_notifications():
@@ -25,3 +27,9 @@ def test_null_notifier_accepts_open_and_closed_notifications():
     assert notifier.runtime_failed("safe error") is None
     assert notifier.position_opened(position) is None
     assert notifier.trade_closed(trade, TradeStatistics()) is None
+    assert (
+        notifier.pending_entry_event(
+            make_pending_event(PendingEntryStatus.WORKING)
+        )
+        is None
+    )
