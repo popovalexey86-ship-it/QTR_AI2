@@ -92,7 +92,7 @@ def test_snapshots_are_processed_in_chronological_order():
     strategy = ScriptedStrategy([None, None, None])
     history = snapshots([candle(1), candle(2), candle(3)])
 
-    result = runner(strategy).run(history)
+    result = runner(strategy).run(iter(history))
 
     assert strategy.timestamps == [item.last.timestamp for item in history]
     assert result.candles_processed == 3
@@ -181,6 +181,16 @@ def test_unclosed_position_is_reported_in_result():
 
     assert result.total_trades == 0
     assert result.has_open_position is True
+
+
+def test_invalid_market_fill_is_counted_and_does_not_open_position():
+    result = runner(ScriptedStrategy([setup()])).run(
+        snapshots([candle(1, close=111.0, high=112.0, low=110.0)])
+    )
+
+    assert result.rejected_orders == 1
+    assert result.total_trades == 0
+    assert result.has_open_position is False
 
 
 def test_one_winning_trade_has_consistent_metrics():

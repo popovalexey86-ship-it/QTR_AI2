@@ -12,7 +12,7 @@ from market_structure.structure_engine import StructureEngine
 from strategies.smc_strategy import SMCStrategy
 
 
-def create_sample_backtest_runner() -> BacktestRunner:
+def create_backtest_runner(symbol: str) -> BacktestRunner:
     analysis_engine = AnalysisEngine(
         swing_engine=SwingEngine(),
         structure_engine=StructureEngine(),
@@ -23,8 +23,12 @@ def create_sample_backtest_runner() -> BacktestRunner:
         setup_engine=SetupEngine(),
     )
     return BacktestRunner(
-        symbol="BTCUSDT",
+        symbol=symbol,
         strategy=SMCStrategy(analysis_engine),
         decision_engine=DecisionEngine(),
         risk_manager=RiskManager(risk_reward=2.0),
     )
+
+
+def create_sample_backtest_runner() -> BacktestRunner:
+    return create_backtest_runner("BTCUSDT")

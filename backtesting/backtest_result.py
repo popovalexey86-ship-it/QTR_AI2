@@ -16,6 +16,7 @@ class BacktestResult:
     net_pnl: float
     has_open_position: bool
     completed_trades: tuple[Trade, ...]
+    rejected_orders: int = 0
 
     def summary(self) -> str:
         status = "OPEN" if self.has_open_position else "FLAT"
