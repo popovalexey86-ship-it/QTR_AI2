@@ -1,5 +1,7 @@
 from datetime import datetime
 
+import pytest
+
 from core.broker import Broker
 from core.decision import Decision
 from core.execution import Execution
@@ -86,3 +88,21 @@ def test_execute_trade_request():
     assert position.stop_loss == 95.0
     assert position.take_profit == 110.0
     assert position.volume == 0.10
+
+
+def test_unsupported_broker_pending_api_fails_closed_without_market_fallback():
+    broker = FakeBroker()
+    trade_request = make_request()
+
+    with pytest.raises(NotImplementedError, match="not supported"):
+        broker.submit_entry(
+            trade_request,
+            order_link_id="QTR-order",
+            setup_key="setup-key",
+            signal_timestamp=datetime.now().astimezone(),
+        )
+
+    assert broker.get_pending_entry() is None
+    assert broker.get_entry_order("QTR-order") is None
+    with pytest.raises(NotImplementedError, match="not supported"):
+        broker.cancel_entry("QTR-order")

@@ -29,12 +29,16 @@ class BacktestRunner:
         strategy: Strategy,
         decision_engine: DecisionEngine,
         risk_manager: RiskManager,
+        pending_entry_ttl_candles: int = 4,
     ) -> None:
         if not symbol:
             raise BacktestInputError("Backtest symbol cannot be empty.")
 
         self._symbol = symbol
-        self._broker = SimulatedBroker(symbol=symbol)
+        self._broker = SimulatedBroker(
+            symbol=symbol,
+            pending_entry_ttl_candles=pending_entry_ttl_candles,
+        )
         self._execution = Execution(self._broker)
         self._journal = TradeJournal()
         self._statistics = TradeStatistics()
@@ -74,11 +78,12 @@ class BacktestRunner:
             except SimulatedOrderRejected:
                 rejected_orders += 1
                 logger.info(
-                    "Simulated market order rejected because protective "
-                    "levels are invalid for the candle-close fill."
+                    "Simulated pending entry rejected because protective "
+                    "levels are invalid for its limit price."
                 )
-            # TradingEngine checks positions before execution. Synchronize the
-            # monitor after execution so a close on the next candle is observed.
+            # Synchronize a newly submitted entry or confirmed position state.
+            # Ticket deduplication prevents a same-candle trade from being
+            # counted again after TradingEngine's initial monitor update.
             self._position_monitor.update()
             candles_processed += 1
 
@@ -89,6 +94,7 @@ class BacktestRunner:
         gross_profit = sum(trade.pnl for trade in trades if trade.pnl > 0)
         gross_loss = -sum(trade.pnl for trade in trades if trade.pnl < 0)
 
+        final_pending_entry = self._broker.get_pending_entry()
         return BacktestResult(
             symbol=self._symbol,
             candles_processed=candles_processed,
@@ -102,6 +108,11 @@ class BacktestRunner:
             has_open_position=self._broker.get_open_position() is not None,
             completed_trades=trades,
             rejected_orders=rejected_orders,
+            has_pending_entry=final_pending_entry is not None,
+            final_pending_entry=final_pending_entry,
+            submitted_entries=self._broker.submitted_entry_count,
+            filled_entries=self._broker.filled_entry_count,
+            expired_entries=self._broker.expired_entry_count,
         )
 
     def _validate_snapshot(

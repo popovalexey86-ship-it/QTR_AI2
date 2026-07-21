@@ -62,7 +62,7 @@ def test_open_to_closed_adds_trade_and_preserves_previous_position():
     position = make_position()
     trade = make_trade()
     execution.get_open_position.side_effect = [position, None]
-    execution.get_last_closed_trade.return_value = trade
+    execution.get_last_closed_trade.side_effect = [None, trade]
     statistics = TradeStatistics()
     journal = TradeJournal()
     notifier = Mock()
@@ -80,14 +80,14 @@ def test_open_to_closed_adds_trade_and_preserves_previous_position():
     assert monitor.previous_position is position
     assert statistics.trades == (trade,)
     assert journal.trades == (trade,)
-    assert execution.get_last_closed_trade.call_count == 1
+    assert execution.get_last_closed_trade.call_count == 2
     notifier.trade_closed.assert_called_once_with(trade, statistics)
 
 
 def test_repeated_update_after_close_does_not_lookup_or_add_trade_again():
     execution = Mock()
     execution.get_open_position.side_effect = [make_position(), None, None]
-    execution.get_last_closed_trade.return_value = make_trade()
+    execution.get_last_closed_trade.side_effect = [None, make_trade(), make_trade()]
     statistics = TradeStatistics()
     monitor = PositionMonitor(execution, statistics, TradeJournal(), NullNotifier())
 
@@ -96,7 +96,7 @@ def test_repeated_update_after_close_does_not_lookup_or_add_trade_again():
     monitor.update()
 
     assert statistics.total_trades == 1
-    assert execution.get_last_closed_trade.call_count == 1
+    assert execution.get_last_closed_trade.call_count == 3
 
 
 def test_duplicate_closed_trade_ticket_is_not_added_twice():
@@ -107,7 +107,8 @@ def test_duplicate_closed_trade_ticket_is_not_added_twice():
         make_position("position-2"),
         None,
     ]
-    execution.get_last_closed_trade.return_value = make_trade("trade-1")
+    trade = make_trade("trade-1")
+    execution.get_last_closed_trade.side_effect = [None, trade, trade, trade]
     statistics = TradeStatistics()
     notifier = Mock()
     monitor = PositionMonitor(execution, statistics, TradeJournal(), notifier)
@@ -116,7 +117,7 @@ def test_duplicate_closed_trade_ticket_is_not_added_twice():
         monitor.update()
 
     assert statistics.total_trades == 1
-    assert execution.get_last_closed_trade.call_count == 2
+    assert execution.get_last_closed_trade.call_count == 4
     notifier.trade_closed.assert_called_once()
 
 
@@ -142,7 +143,7 @@ def test_existing_journal_trade_is_not_added_or_logged_again(monkeypatch):
     journal = TradeJournal()
     journal.add_trade(trade)
     execution.get_open_position.side_effect = [make_position(), None]
-    execution.get_last_closed_trade.return_value = trade
+    execution.get_last_closed_trade.side_effect = [None, trade]
     statistics = TradeStatistics()
     logger = Mock()
     monkeypatch.setattr("core.position_monitor.logger", logger)
@@ -168,7 +169,7 @@ def test_journal_error_does_not_add_trade_to_statistics():
 
     execution = Mock()
     execution.get_open_position.side_effect = [make_position(), None]
-    execution.get_last_closed_trade.return_value = make_trade()
+    execution.get_last_closed_trade.side_effect = [None, make_trade()]
     statistics = TradeStatistics()
     monitor = PositionMonitor(execution, statistics, FailingJournal(), NullNotifier())
 
@@ -196,7 +197,7 @@ def test_monitor_retries_trade_after_journal_recovers():
     execution = Mock()
     trade = make_trade()
     execution.get_open_position.side_effect = [make_position(), None, None]
-    execution.get_last_closed_trade.return_value = trade
+    execution.get_last_closed_trade.side_effect = [None, trade, trade]
     statistics = TradeStatistics()
     journal = RecoveringJournal()
     monitor = PositionMonitor(execution, statistics, journal, NullNotifier())
@@ -218,7 +219,7 @@ def test_unexpected_runtime_error_is_not_logged_as_journal_write_error(monkeypat
     journal.add_trade.side_effect = RuntimeError("programming error")
     execution = Mock()
     execution.get_open_position.side_effect = [make_position(), None]
-    execution.get_last_closed_trade.return_value = make_trade()
+    execution.get_last_closed_trade.side_effect = [None, make_trade()]
     statistics = TradeStatistics()
     logger = Mock()
     monkeypatch.setattr("core.position_monitor.logger", logger)
@@ -260,7 +261,7 @@ def test_notification_error_on_close_keeps_journal_and_statistics(monkeypatch):
     execution = Mock()
     trade = make_trade()
     execution.get_open_position.side_effect = [make_position(), None]
-    execution.get_last_closed_trade.return_value = trade
+    execution.get_last_closed_trade.side_effect = [None, trade]
     statistics = TradeStatistics()
     journal = TradeJournal()
     notifier = Mock()
@@ -286,3 +287,41 @@ def test_unexpected_notifier_error_is_not_masked():
 
     with pytest.raises(RuntimeError, match="programming error"):
         monitor.update()
+
+
+def test_first_update_baselines_existing_historical_closed_trade() -> None:
+    execution = Mock()
+    historical_trade = make_trade("historical-trade")
+    execution.get_open_position.return_value = None
+    execution.get_last_closed_trade.return_value = historical_trade
+    statistics = TradeStatistics()
+    journal = TradeJournal()
+    notifier = Mock()
+    monitor = PositionMonitor(execution, statistics, journal, notifier)
+
+    monitor.update()
+
+    assert journal.trades == ()
+    assert statistics.trades == ()
+    assert monitor._last_closed_trade_ticket == historical_trade.ticket
+    notifier.trade_closed.assert_not_called()
+
+
+def test_unseen_same_candle_open_and_close_is_journaled_once() -> None:
+    execution = Mock()
+    trade = make_trade("same-candle-trade")
+    execution.get_open_position.side_effect = [None, None, None]
+    execution.get_last_closed_trade.side_effect = [None, trade, trade]
+    statistics = TradeStatistics()
+    journal = TradeJournal()
+    notifier = Mock()
+    monitor = PositionMonitor(execution, statistics, journal, notifier)
+
+    monitor.update()
+    monitor.update()
+    monitor.update()
+
+    assert journal.trades == (trade,)
+    assert statistics.trades == (trade,)
+    notifier.position_opened.assert_not_called()
+    notifier.trade_closed.assert_called_once_with(trade, statistics)
