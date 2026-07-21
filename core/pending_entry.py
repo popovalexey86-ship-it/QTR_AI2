@@ -34,6 +34,7 @@ _ALLOWED_TRANSITIONS: dict[
         {
             PendingEntryStatus.WORKING,
             PendingEntryStatus.PARTIALLY_FILLED,
+            PendingEntryStatus.CANCEL_REQUESTED,
             PendingEntryStatus.FILLED,
             PendingEntryStatus.CANCELLED,
             PendingEntryStatus.REJECTED,
