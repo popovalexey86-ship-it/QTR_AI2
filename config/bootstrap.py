@@ -13,10 +13,12 @@ from core.setup_engine import SetupEngine
 from core.decision_engine import DecisionEngine
 
 from core.execution import Execution
-from core.trade_journal import TradeJournal
 from core.position_monitor import PositionMonitor
 from core.risk_manager import RiskManager
 from core.trade_statistics import TradeStatistics
+from infrastructure.csv_trade_journal import CsvTradeJournal
+from infrastructure.null_notifier import NullNotifier
+from infrastructure.telegram_notifier import TelegramNotifier
 
 from engine.trading_engine import TradingEngine
 from strategies.smc_strategy import SMCStrategy
@@ -64,12 +66,25 @@ def create_trading_engine(
     execution = Execution(
         broker=container.broker,
     )
+    journal = CsvTradeJournal(container.config.trade_journal_path)
     statistics = TradeStatistics()
-    journal = TradeJournal()
+
+    for trade in journal.trades:
+        statistics.add_trade(trade)
+
+    if container.config.telegram_enabled:
+        notifier = TelegramNotifier(
+            bot_token=container.config.telegram_bot_token or "",
+            chat_id=container.config.telegram_chat_id or "",
+        )
+    else:
+        notifier = NullNotifier()
+
     position_monitor = PositionMonitor(
         execution=execution,
         statistics=statistics,
         journal=journal,
+        notifier=notifier,
     )
 
     # Trading Engine

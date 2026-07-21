@@ -18,6 +18,9 @@ __pycache__/
 # Logs
 *.log
 
+# Persistent local trading data
+data/
+
 # pytest
 .pytest_cache/
 
