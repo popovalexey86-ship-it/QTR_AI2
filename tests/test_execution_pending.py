@@ -181,3 +181,54 @@ def test_genuinely_new_setup_can_submit_after_terminal_entry() -> None:
 
     assert pending.status == PendingEntryStatus.SUBMITTED
     assert broker.submitted_entry_count == 2
+
+
+def test_recovered_order_link_id_blocks_deterministic_duplicate() -> None:
+    broker = SimulatedBroker("BTCUSDT")
+    execution = Execution(broker)
+    trade_request = request()
+    setup_key = build_setup_key(
+        symbol="BTCUSDT",
+        direction=trade_request.decision,
+        setup_timestamp=trade_request.setup.timestamp,
+        entry=trade_request.entry,
+        stop_loss=trade_request.stop_loss,
+        take_profit=trade_request.take_profit,
+    )
+    recovered_order_link_id = build_order_link_id(setup_key)
+
+    execution.register_recovered_order_link_id(recovered_order_link_id)
+
+    with pytest.raises(DuplicatePendingSetupError, match="recovered"):
+        submit(execution, trade_request)
+    assert broker.submitted_entry_count == 0
+
+
+def test_recovered_order_link_id_registration_is_idempotent() -> None:
+    execution = Execution(SimulatedBroker("BTCUSDT"))
+
+    execution.register_recovered_order_link_id("QTR-recovered-order")
+    execution.register_recovered_order_link_id("QTR-recovered-order")
+
+
+def test_unrelated_setup_remains_allowed_after_recovery_registration() -> None:
+    broker = SimulatedBroker("BTCUSDT")
+    execution = Execution(broker)
+    execution.register_recovered_order_link_id("QTR-unrelated-recovered-order")
+
+    pending = submit(execution, request())
+
+    assert pending.status == PendingEntryStatus.SUBMITTED
+    assert broker.submitted_entry_count == 1
+
+
+def test_recovery_registration_does_not_weaken_setup_key_deduplication() -> None:
+    broker = SimulatedBroker("BTCUSDT")
+    execution = Execution(broker)
+    trade_request = request()
+    execution.register_recovered_order_link_id("QTR-unrelated-recovered-order")
+    submit(execution, trade_request)
+    execution.cancel_pending_entry()
+
+    with pytest.raises(DuplicatePendingSetupError, match="structural setup"):
+        submit(execution, trade_request)

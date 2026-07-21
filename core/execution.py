@@ -25,6 +25,13 @@ class Execution:
     ):
         self._broker = broker
         self._submitted_setup_keys: set[str] = set()
+        self._recovered_order_link_ids: set[str] = set()
+
+    def register_recovered_order_link_id(self, order_link_id: str) -> None:
+        normalized_order_link_id = order_link_id.strip()
+        if not normalized_order_link_id:
+            raise ValueError("Recovered order link ID cannot be empty.")
+        self._recovered_order_link_ids.add(normalized_order_link_id)
 
     def execute(
         self,
@@ -56,6 +63,11 @@ class Execution:
             raise DuplicatePendingSetupError(
                 "The structural setup was already submitted."
             )
+        order_link_id = build_order_link_id(setup_key)
+        if order_link_id in self._recovered_order_link_ids:
+            raise DuplicatePendingSetupError(
+                "The recovered pending order was already submitted."
+            )
         if self.get_open_position() is not None:
             raise PendingEntryConflictError(
                 "An open position blocks pending entry submission."
@@ -65,7 +77,6 @@ class Execution:
                 "An active pending entry blocks another submission."
             )
 
-        order_link_id = build_order_link_id(setup_key)
         self._submitted_setup_keys.add(setup_key)
         self._broker.submit_entry(
             request,

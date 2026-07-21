@@ -69,6 +69,21 @@ def test_pending_order_query_wrappers_use_pybit_argument_names(
     )
 
 
+def test_open_order_listing_omits_order_link_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, session, _ = make_client(monkeypatch, testnet=True)
+    session.get_open_orders.return_value = {"retCode": 0, "result": {"list": []}}
+
+    response = client.list_open_orders("linear", "BTCUSDT")
+
+    assert response == {"retCode": 0, "result": {"list": []}}
+    session.get_open_orders.assert_called_once_with(
+        category="linear",
+        symbol="BTCUSDT",
+    )
+
+
 def test_cancel_order_omits_optional_order_id_when_absent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

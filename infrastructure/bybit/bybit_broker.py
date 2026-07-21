@@ -21,8 +21,15 @@ from infrastructure.bybit.bybit_client import BybitClient
 from infrastructure.bybit.bybit_entry_order_mapper import BybitEntryOrderMapper
 from infrastructure.bybit.bybit_entry_order_snapshot_mapper import (
     BybitEntryOrderSnapshotMapper,
+    extract_order_items,
 )
 from infrastructure.bybit.bybit_order_mapper import BybitOrderMapper
+from infrastructure.bybit.bybit_pending_entry_store import (
+    SCHEMA_VERSION,
+    BybitPendingEntryStore,
+    BybitPendingEntryStoreError,
+    PersistedBybitPendingEntry,
+)
 from infrastructure.bybit.bybit_position_mapper import BybitPositionMapper
 from infrastructure.bybit.bybit_trade_mapper import BybitTradeMapper
 
@@ -35,6 +42,18 @@ class BybitPendingEntryError(BrokerError):
     """Raised when the Bybit pending-entry lifecycle fails closed."""
 
 
+class BybitPendingEntryPersistenceError(BybitPendingEntryError):
+    """Raised when local durable state cannot be updated safely."""
+
+
+class BybitActiveOrderConflictError(BybitPendingEntryError):
+    """Raised when active exchange-order ownership is ambiguous."""
+
+
+class BybitPendingEntryRecoveryError(BybitPendingEntryError):
+    """Raised when startup pending-entry recovery cannot proceed safely."""
+
+
 class BybitBroker(Broker):
     def __init__(
         self,
@@ -45,6 +64,7 @@ class BybitBroker(Broker):
         position_mapper: BybitPositionMapper | None = None,
         entry_order_mapper: BybitEntryOrderMapper | None = None,
         entry_snapshot_mapper: BybitEntryOrderSnapshotMapper | None = None,
+        pending_entry_store: BybitPendingEntryStore | None = None,
     ) -> None:
         self._client = client
         self._order_mapper = order_mapper or BybitOrderMapper()
@@ -55,9 +75,11 @@ class BybitBroker(Broker):
         )
         self._category = category
         self._symbol = symbol
+        self._pending_entry_store = pending_entry_store
         self._pending_entry: PendingEntry | None = None
         self._entry_orders: dict[str, PendingEntry] = {}
         self._cancel_requested_order_ids: set[str] = set()
+        self._last_aged_candle_timestamp: datetime | None = None
 
     def submit_entry(
         self,
@@ -86,6 +108,7 @@ class BybitBroker(Broker):
                 raise BybitPendingEntryError(
                     "The active order link ID has conflicting content."
                 )
+            self._persist_pending_entry(active)
             return EntryOrderAcknowledgement(
                 order_link_id=active.order_link_id,
                 exchange_order_id=active.exchange_order_id,
@@ -105,6 +128,7 @@ class BybitBroker(Broker):
             raise BybitPendingEntryError(
                 "An open position blocks pending entry submission."
             )
+        self._ensure_submission_has_no_active_order_conflict()
 
         mapped_request = self._entry_order_mapper.to_order_request(
             request,
@@ -145,6 +169,7 @@ class BybitBroker(Broker):
         )
         self._pending_entry = pending
         self._entry_orders[order_link_id] = pending
+        self._persist_pending_entry(pending)
         return EntryOrderAcknowledgement(
             order_link_id=order_link_id,
             exchange_order_id=exchange_order_id,
@@ -154,6 +179,24 @@ class BybitBroker(Broker):
         self,
         order_link_id: str,
     ) -> EntryOrderSnapshot | None:
+        snapshot, _ = self._query_entry_order(order_link_id)
+
+        active = self._pending_entry
+        if snapshot is None:
+            if active is not None and active.order_link_id == order_link_id:
+                raise BybitPendingEntryError(
+                    "The active pending entry is missing from Bybit order queries."
+                )
+            return None
+
+        if active is None or active.order_link_id != order_link_id:
+            return snapshot
+        return self._reconcile_active_entry(active, snapshot)
+
+    def _query_entry_order(
+        self,
+        order_link_id: str,
+    ) -> tuple[EntryOrderSnapshot | None, bool]:
         try:
             realtime_response = self._client.get_open_orders(
                 category=self._category,
@@ -172,6 +215,9 @@ class BybitBroker(Broker):
             realtime_response,
             expected_order_link_id=order_link_id,
         )
+        if snapshot is not None:
+            return snapshot, True
+
         if snapshot is None:
             try:
                 history_response = self._client.get_order_history(
@@ -191,18 +237,7 @@ class BybitBroker(Broker):
                 history_response,
                 expected_order_link_id=order_link_id,
             )
-
-        active = self._pending_entry
-        if snapshot is None:
-            if active is not None and active.order_link_id == order_link_id:
-                raise BybitPendingEntryError(
-                    "The active pending entry is missing from Bybit order queries."
-                )
-            return None
-
-        if active is None or active.order_link_id != order_link_id:
-            return snapshot
-        return self._reconcile_active_entry(active, snapshot)
+        return snapshot, False
 
     def cancel_entry(self, order_link_id: str) -> None:
         active = self._pending_entry
@@ -219,9 +254,13 @@ class BybitBroker(Broker):
             )
         if (
             active.status in _TERMINAL_ENTRY_STATUSES
-            or order_link_id in self._cancel_requested_order_ids
+        ):
+            return
+        if (
+            order_link_id in self._cancel_requested_order_ids
             or active.status == PendingEntryStatus.CANCEL_REQUESTED
         ):
+            self._persist_pending_entry(active)
             return
 
         try:
@@ -272,9 +311,221 @@ class BybitBroker(Broker):
         self._pending_entry = cancel_requested
         self._entry_orders[order_link_id] = cancel_requested
         self._cancel_requested_order_ids.add(order_link_id)
+        self._persist_pending_entry(cancel_requested)
+
+    def recover_pending_entry(self) -> PendingEntry | None:
+        if self._pending_entry_store is None:
+            raise BybitPendingEntryRecoveryError(
+                "Pending-entry recovery requires durable storage."
+            )
+
+        try:
+            persisted = self._pending_entry_store.load()
+        except BybitPendingEntryStoreError:
+            raise BybitPendingEntryRecoveryError(
+                "Durable pending-entry state could not be loaded."
+            ) from None
+
+        active_orders = self._list_active_exchange_orders()
+        owned_orders, foreign_orders = _classify_active_orders(active_orders)
+        if foreign_orders:
+            raise BybitActiveOrderConflictError(
+                "A foreign or manual active order blocks QTR recovery."
+            )
+        if len(owned_orders) > 1:
+            raise BybitActiveOrderConflictError(
+                "Multiple QTR-owned active orders block recovery."
+            )
+
+        if persisted is None:
+            if owned_orders:
+                raise BybitPendingEntryRecoveryError(
+                    "An orphaned QTR-owned active order requires manual review."
+                )
+            self._pending_entry = None
+            return None
+
+        restored = persisted.pending_entry
+        self._validate_recovery_state(restored)
+        if owned_orders:
+            owned_item = owned_orders[0]
+            owned_order_link_id = _order_link_id(owned_item)
+            if owned_order_link_id != restored.order_link_id:
+                raise BybitPendingEntryRecoveryError(
+                    "Durable state does not match the active QTR order."
+                )
+            self._validate_exchange_order_scope(owned_item)
+            if self._safe_get_open_position_for_recovery() is not None:
+                raise BybitPendingEntryRecoveryError(
+                    "An open position and active entry order are ambiguous."
+                )
+            try:
+                snapshot = self._entry_snapshot_mapper.from_item(
+                    owned_item,
+                    expected_order_link_id=restored.order_link_id,
+                )
+            except BrokerError:
+                raise BybitPendingEntryRecoveryError(
+                    "The active QTR order snapshot is malformed."
+                ) from None
+            self._restore_pending_entry(persisted)
+            self._reconcile_recovered_entry(restored, snapshot)
+            return self._pending_entry
+
+        self._restore_pending_entry(persisted)
+        try:
+            queried_snapshot, found_realtime = self._query_entry_order(
+                restored.order_link_id
+            )
+        except BrokerError:
+            raise BybitPendingEntryRecoveryError(
+                "Pending-entry lookup during recovery failed."
+            ) from None
+        if queried_snapshot is None:
+            raise BybitPendingEntryRecoveryError(
+                "Durable pending entry is missing from Bybit order queries."
+            )
+        self._reconcile_recovered_entry(restored, queried_snapshot)
+        if queried_snapshot.status in _TERMINAL_ENTRY_STATUSES:
+            return None
+        if not found_realtime:
+            raise BybitPendingEntryRecoveryError(
+                "Historical state does not prove an active pending entry."
+            )
+        return self._pending_entry
+
+    def _reconcile_recovered_entry(
+        self,
+        restored: PendingEntry,
+        snapshot: EntryOrderSnapshot,
+    ) -> None:
+        try:
+            self._reconcile_active_entry(restored, snapshot)
+        except BybitPendingEntryPersistenceError:
+            raise
+        except BrokerError:
+            raise BybitPendingEntryRecoveryError(
+                "Pending-entry state could not be reconciled during recovery."
+            ) from None
 
     def get_pending_entry(self) -> PendingEntry | None:
         return self._pending_entry
+
+    def _restore_pending_entry(
+        self,
+        persisted: PersistedBybitPendingEntry,
+    ) -> None:
+        restored = persisted.pending_entry
+        self._pending_entry = restored
+        self._entry_orders[restored.order_link_id] = restored
+        self._last_aged_candle_timestamp = persisted.last_aged_candle_timestamp
+        if restored.status == PendingEntryStatus.CANCEL_REQUESTED:
+            self._cancel_requested_order_ids.add(restored.order_link_id)
+
+    def _validate_recovery_state(self, entry: PendingEntry) -> None:
+        if not entry.order_link_id.startswith("QTR-"):
+            raise BybitPendingEntryRecoveryError(
+                "Durable state is not owned by QTR."
+            )
+        if entry.request.symbol.strip().upper() != self._symbol.strip().upper():
+            raise BybitPendingEntryRecoveryError(
+                "Durable pending-entry symbol does not match the broker."
+            )
+
+    def _validate_exchange_order_scope(
+        self,
+        item: Mapping[str, Any],
+    ) -> None:
+        item_symbol = item.get("symbol")
+        if (
+            item_symbol is not None
+            and (
+                not isinstance(item_symbol, str)
+                or item_symbol.strip().upper() != self._symbol.strip().upper()
+            )
+        ):
+            raise BybitPendingEntryRecoveryError(
+                "The active order symbol does not match the broker."
+            )
+        item_category = item.get("category")
+        if (
+            item_category is not None
+            and (
+                not isinstance(item_category, str)
+                or item_category.strip() != self._category
+            )
+        ):
+            raise BybitPendingEntryRecoveryError(
+                "The active order category does not match the broker."
+            )
+
+    def _safe_get_open_position_for_recovery(self) -> Position | None:
+        try:
+            return self.get_open_position()
+        except Exception:
+            raise BybitPendingEntryRecoveryError(
+                "Open-position recovery check failed."
+            ) from None
+
+    def _list_active_exchange_orders(
+        self,
+    ) -> tuple[Mapping[str, Any], ...]:
+        try:
+            response = self._client.list_open_orders(
+                category=self._category,
+                symbol=self._symbol,
+            )
+        except Exception:
+            raise BybitActiveOrderConflictError(
+                "Bybit active-order listing failed."
+            ) from None
+        try:
+            _require_mapping_response(
+                response,
+                operation="active-order listing",
+            )
+            return extract_order_items(response)
+        except BrokerError:
+            raise BybitActiveOrderConflictError(
+                "Bybit active-order listing is malformed."
+            ) from None
+
+    def _ensure_submission_has_no_active_order_conflict(self) -> None:
+        active_orders = self._list_active_exchange_orders()
+        owned_orders, foreign_orders = _classify_active_orders(active_orders)
+        if foreign_orders:
+            raise BybitActiveOrderConflictError(
+                "A foreign or manual active order blocks submission."
+            )
+        if owned_orders:
+            raise BybitActiveOrderConflictError(
+                "An orphaned QTR-owned active order blocks submission."
+            )
+
+    def _persist_pending_entry(self, entry: PendingEntry) -> None:
+        if self._pending_entry_store is None:
+            return
+        state = PersistedBybitPendingEntry(
+            schema_version=SCHEMA_VERSION,
+            pending_entry=entry,
+            last_aged_candle_timestamp=self._last_aged_candle_timestamp,
+        )
+        try:
+            self._pending_entry_store.save(state)
+        except BybitPendingEntryStoreError:
+            raise BybitPendingEntryPersistenceError(
+                "Durable pending-entry state could not be saved."
+            ) from None
+
+    def _clear_persisted_pending_entry(self) -> None:
+        if self._pending_entry_store is None:
+            return
+        try:
+            self._pending_entry_store.clear()
+        except BybitPendingEntryStoreError:
+            raise BybitPendingEntryPersistenceError(
+                "Durable pending-entry state could not be cleared."
+            ) from None
 
     def _reconcile_active_entry(
         self,
@@ -299,6 +550,7 @@ class BybitBroker(Broker):
             )
 
         if _is_stale_snapshot(active.status, snapshot.status):
+            self._persist_pending_entry(active)
             return _snapshot_from_pending(active)
 
         if (
@@ -338,8 +590,14 @@ class BybitBroker(Broker):
 
         if updated.status in _TERMINAL_ENTRY_STATUSES:
             self._pending_entry = None
+            try:
+                self._clear_persisted_pending_entry()
+            except BybitPendingEntryPersistenceError:
+                self._pending_entry = updated
+                raise
             return snapshot
 
+        self._persist_pending_entry(updated)
         if snapshot.status == PendingEntryStatus.PARTIALLY_FILLED:
             self.cancel_entry(active.order_link_id)
         return snapshot
@@ -504,6 +762,29 @@ def _is_stale_snapshot(
         },
     }
     return snapshot_status in stale_by_local_status.get(local_status, set())
+
+
+def _classify_active_orders(
+    orders: tuple[Mapping[str, Any], ...],
+) -> tuple[tuple[Mapping[str, Any], ...], tuple[Mapping[str, Any], ...]]:
+    owned: list[Mapping[str, Any]] = []
+    foreign: list[Mapping[str, Any]] = []
+    for item in orders:
+        order_link_id = item.get("orderLinkId")
+        if isinstance(order_link_id, str) and order_link_id.startswith("QTR-"):
+            owned.append(item)
+        else:
+            foreign.append(item)
+    return tuple(owned), tuple(foreign)
+
+
+def _order_link_id(item: Mapping[str, Any]) -> str:
+    value = item.get("orderLinkId")
+    if not isinstance(value, str) or not value:
+        raise BybitActiveOrderConflictError(
+            "An active QTR order has an invalid order link ID."
+        )
+    return value
 
 
 _TERMINAL_ENTRY_STATUSES = frozenset(

@@ -77,6 +77,16 @@ class BybitClient:
             orderLinkId=order_link_id,
         )
 
+    def list_open_orders(
+        self,
+        category: str,
+        symbol: str,
+    ) -> dict:
+        return self._session.get_open_orders(
+            category=category,
+            symbol=symbol,
+        )
+
     def get_order_history(
         self,
         category: str,

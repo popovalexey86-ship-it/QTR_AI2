@@ -17,6 +17,7 @@ from infrastructure.bybit.bybit_broker import (
 from infrastructure.bybit.bybit_entry_order_snapshot_mapper import (
     BybitEntryOrderSnapshotError,
 )
+from infrastructure.bybit.bybit_pending_entry_store import BybitPendingEntryStore
 
 
 ORDER_LINK_ID = "QTR-0123456789abcdef"
@@ -72,7 +73,11 @@ def _order_item(
     }
 
 
-def _broker(*, testnet: bool = True) -> tuple[BybitBroker, Mock]:
+def _broker(
+    *,
+    testnet: bool = True,
+    pending_entry_store: BybitPendingEntryStore | None = None,
+) -> tuple[BybitBroker, Mock]:
     client = Mock()
     client.is_testnet = testnet
     client.get_positions.return_value = {
@@ -87,6 +92,7 @@ def _broker(*, testnet: bool = True) -> tuple[BybitBroker, Mock]:
         },
     }
     client.get_open_orders.return_value = _query_response()
+    client.list_open_orders.return_value = _query_response()
     client.get_order_history.return_value = _query_response()
     client.cancel_order.return_value = {
         "retCode": 0,
@@ -100,6 +106,7 @@ def _broker(*, testnet: bool = True) -> tuple[BybitBroker, Mock]:
             client=client,
             category="linear",
             symbol="BTCUSDT",
+            pending_entry_store=pending_entry_store,
         ),
         client,
     )
