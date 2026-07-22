@@ -7,7 +7,13 @@ from typing import Any
 
 from core.broker import Broker
 from core.entry_order import EntryOrderAcknowledgement, EntryOrderSnapshot
-from core.exceptions import BrokerError, OrderRejectedError
+from core.exceptions import (
+    BrokerError,
+    OrderRejectedError,
+    RateLimitError,
+    TemporaryExchangeError,
+    TemporaryTransportError,
+)
 from core.pending_entry import (
     InvalidPendingEntryTransition,
     PendingEntry,
@@ -53,6 +59,13 @@ class BybitActiveOrderConflictError(BybitPendingEntryError):
 
 class BybitPendingEntryRecoveryError(BybitPendingEntryError):
     """Raised when startup pending-entry recovery cannot proceed safely."""
+
+
+_TEMPORARY_READ_ERRORS = (
+    TemporaryTransportError,
+    TemporaryExchangeError,
+    RateLimitError,
+)
 
 
 class BybitBroker(Broker):
@@ -137,6 +150,8 @@ class BybitBroker(Broker):
             )
         try:
             open_position = self.get_open_position()
+        except _TEMPORARY_READ_ERRORS:
+            raise
         except Exception:
             raise BybitPendingEntryError(
                 "Bybit open-position safety check failed."
@@ -226,6 +241,8 @@ class BybitBroker(Broker):
                 symbol=self._symbol,
                 order_link_id=order_link_id,
             )
+        except _TEMPORARY_READ_ERRORS:
+            raise
         except Exception:
             raise BybitPendingEntryError(
                 "Bybit realtime entry-order query failed."
@@ -248,6 +265,8 @@ class BybitBroker(Broker):
                     symbol=self._symbol,
                     order_link_id=order_link_id,
                 )
+            except _TEMPORARY_READ_ERRORS:
+                raise
             except Exception:
                 raise BybitPendingEntryError(
                     "Bybit historical entry-order query failed."
@@ -656,6 +675,8 @@ class BybitBroker(Broker):
     def _safe_get_open_position_for_recovery(self) -> Position | None:
         try:
             return self.get_open_position()
+        except _TEMPORARY_READ_ERRORS:
+            raise
         except Exception:
             raise BybitPendingEntryRecoveryError(
                 "Open-position recovery check failed."
@@ -669,6 +690,8 @@ class BybitBroker(Broker):
                 category=self._category,
                 symbol=self._symbol,
             )
+        except _TEMPORARY_READ_ERRORS:
+            raise
         except Exception:
             raise BybitActiveOrderConflictError(
                 "Bybit active-order listing failed."

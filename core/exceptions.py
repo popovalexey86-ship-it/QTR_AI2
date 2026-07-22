@@ -6,6 +6,18 @@ class BrokerError(Exception):
     pass
 
 
+class TemporaryTransportError(BrokerError):
+    """A read-only broker request failed because transport is unavailable."""
+
+
+class TemporaryExchangeError(BrokerError):
+    """A read-only broker request failed because the exchange is unavailable."""
+
+
+class RateLimitError(TemporaryExchangeError):
+    """A read-only broker request exhausted retries after rate limiting."""
+
+
 class OrderRejectedError(BrokerError):
     """
     Биржа отклонила заявку.
