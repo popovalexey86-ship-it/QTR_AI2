@@ -12,6 +12,7 @@ from core.exceptions import (
     RateLimitError,
     TemporaryExchangeError,
     TemporaryTransportError,
+    UnknownWriteOutcomeError,
 )
 from core.setup import Setup
 from core.trade_request import TradeRequest
@@ -220,18 +221,22 @@ def test_write_request_is_not_retried(
     timeout = requests.ReadTimeout("unknown write outcome")
     session.place_order.side_effect = timeout
 
-    with pytest.raises(requests.ReadTimeout):
+    with pytest.raises(UnknownWriteOutcomeError) as place_error:
         client.place_order(category="linear", symbol="BTCUSDT")
 
     session.place_order.assert_called_once()
     sleep.assert_not_called()
+    assert "place_order" in str(place_error.value)
+    assert "unknown write outcome" not in str(place_error.value)
 
     session.cancel_order.side_effect = timeout
-    with pytest.raises(requests.ReadTimeout):
+    with pytest.raises(UnknownWriteOutcomeError) as cancel_error:
         client.cancel_order("linear", "BTCUSDT", ORDER_LINK_ID)
 
     session.cancel_order.assert_called_once()
     sleep.assert_not_called()
+    assert "cancel_order" in str(cancel_error.value)
+    assert "unknown write outcome" not in str(cancel_error.value)
 
 
 def test_exhausted_read_retry_preserves_pending_and_durable_state(

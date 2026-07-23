@@ -1,14 +1,11 @@
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import Mock
-
 import pytest
 
 from core.pending_entry import PendingEntry, PendingEntryStatus
 from infrastructure.bybit.bybit_broker import (
     BybitActiveOrderConflictError,
-    BybitBroker,
     BybitPendingEntryPersistenceError,
     BybitPendingEntryRecoveryError,
 )

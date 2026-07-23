@@ -11,6 +11,7 @@ from core.exceptions import (
     RateLimitError,
     TemporaryExchangeError,
     TemporaryTransportError,
+    UnknownWriteOutcomeError,
 )
 from core.logger import logger
 from infrastructure.config import Config
@@ -65,7 +66,10 @@ class BybitClient:
         self,
         **kwargs,
     ) -> dict:
-        return self._session.place_order(**kwargs)
+        return self._write_request(
+            "place_order",
+            lambda: self._session.place_order(**kwargs),
+        )
 
     def get_positions(
         self,
@@ -152,7 +156,32 @@ class BybitClient:
         }
         if order_id is not None:
             parameters["orderId"] = order_id
-        return self._session.cancel_order(**parameters)
+        return self._write_request(
+            "cancel_order",
+            lambda: self._session.cancel_order(**parameters),
+        )
+
+    def _write_request(
+        self,
+        operation: str,
+        request: Callable[[], T],
+    ) -> T:
+        try:
+            return request()
+        except (
+            requests.ReadTimeout,
+            requests.ConnectionError,
+            requests.exceptions.SSLError,
+            requests.HTTPError,
+            FailedRequestError,
+            InvalidRequestError,
+        ) as error:
+            if _classify_read_error(operation, error) is not None:
+                raise UnknownWriteOutcomeError(
+                    "Bybit write outcome is unknown. "
+                    f"Operation={operation}."
+                ) from None
+            raise
 
     def _read_request(
         self,

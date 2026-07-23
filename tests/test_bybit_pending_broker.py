@@ -1,9 +1,11 @@
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 
 from core.decision import Decision
+from core.exceptions import UnknownWriteOutcomeError
 from core.pending_entry import PendingEntryStatus
 from core.position import Position
 from core.setup import Setup
@@ -163,6 +165,74 @@ def test_testnet_submission_sends_exact_limit_request_and_stores_submitted() -> 
     assert pending.exchange_order_id == EXCHANGE_ORDER_ID
     assert pending.request.symbol == "ETHUSDT"
     assert broker.get_open_position() is None
+
+
+def test_submit_timeout_recovers_order_from_realtime_lookup(
+    tmp_path: Path,
+) -> None:
+    store = BybitPendingEntryStore(tmp_path / "pending.json")
+    broker, client = _broker(pending_entry_store=store)
+    client.place_order.side_effect = UnknownWriteOutcomeError("safe")
+    client.get_open_orders.return_value = _query_response(_order_item("New"))
+
+    acknowledgement = broker.submit_entry(
+        _request(),
+        order_link_id=ORDER_LINK_ID,
+        setup_key="stable-setup-key",
+        signal_timestamp=SIGNAL_TIMESTAMP,
+    )
+
+    assert acknowledgement.exchange_order_id == EXCHANGE_ORDER_ID
+    pending = broker.get_pending_entry()
+    assert pending is not None
+    assert pending.status == PendingEntryStatus.WORKING
+    persisted = store.load()
+    assert persisted is not None
+    assert persisted.pending_entry.order_link_id == ORDER_LINK_ID
+    assert persisted.pending_entry.status == PendingEntryStatus.WORKING
+    assert persisted.pending_entry.exchange_order_id == EXCHANGE_ORDER_ID
+    client.place_order.assert_called_once()
+    client.get_open_orders.assert_called_once()
+    client.get_order_history.assert_not_called()
+
+
+def test_submit_timeout_recovers_order_from_history_fallback() -> None:
+    broker, client = _broker()
+    client.place_order.side_effect = UnknownWriteOutcomeError("safe")
+    client.get_order_history.return_value = _query_response(_order_item("New"))
+
+    acknowledgement = broker.submit_entry(
+        _request(),
+        order_link_id=ORDER_LINK_ID,
+        setup_key="stable-setup-key",
+        signal_timestamp=SIGNAL_TIMESTAMP,
+    )
+
+    assert acknowledgement.exchange_order_id == EXCHANGE_ORDER_ID
+    pending = broker.get_pending_entry()
+    assert pending is not None
+    assert pending.status == PendingEntryStatus.WORKING
+    client.place_order.assert_called_once()
+    client.get_open_orders.assert_called_once()
+    client.get_order_history.assert_called_once()
+
+
+def test_submit_timeout_with_no_exchange_snapshot_remains_unknown() -> None:
+    broker, client = _broker()
+    client.place_order.side_effect = UnknownWriteOutcomeError(
+        "secret transport detail"
+    )
+
+    with pytest.raises(UnknownWriteOutcomeError) as error:
+        _submit(broker)
+
+    assert "place_order" in str(error.value)
+    assert "secret" not in str(error.value)
+    assert broker.get_pending_entry() is None
+    assert broker.drain_pending_entry_events() == ()
+    client.place_order.assert_called_once()
+    client.get_open_orders.assert_called_once()
+    client.get_order_history.assert_called_once()
 
 
 def test_mainnet_submission_is_refused_before_any_order_or_position_call() -> None:
@@ -490,6 +560,54 @@ def test_cancelled_snapshot_clears_only_after_exchange_confirmation() -> None:
     assert snapshot is not None
     assert snapshot.status == PendingEntryStatus.CANCELLED
     assert broker.get_pending_entry() is None
+
+
+def test_cancel_timeout_reconciles_exchange_cancelled_snapshot() -> None:
+    broker, client = _broker()
+    _submit(broker)
+    client.cancel_order.side_effect = UnknownWriteOutcomeError("safe")
+    client.get_open_orders.return_value = _query_response(
+        _order_item("Cancelled")
+    )
+
+    broker.cancel_entry(ORDER_LINK_ID)
+
+    assert broker.get_pending_entry() is None
+    client.cancel_order.assert_called_once()
+
+
+def test_cancel_timeout_gives_filled_snapshot_priority() -> None:
+    broker, client = _broker()
+    _submit(broker)
+    client.cancel_order.side_effect = UnknownWriteOutcomeError("safe")
+    client.get_open_orders.return_value = _query_response(
+        _order_item("Filled", filled="1", average_price="100.5")
+    )
+
+    broker.cancel_entry(ORDER_LINK_ID)
+
+    assert broker.get_pending_entry() is None
+    terminal_events = broker.drain_pending_entry_events()
+    assert terminal_events[-1].status == PendingEntryStatus.FILLED
+    client.cancel_order.assert_called_once()
+
+
+def test_cancel_timeout_with_still_active_order_blocks_duplicate_cancel() -> None:
+    broker, client = _broker()
+    _submit(broker)
+    client.cancel_order.side_effect = UnknownWriteOutcomeError("safe")
+    client.get_open_orders.return_value = _query_response(_order_item("New"))
+
+    with pytest.raises(UnknownWriteOutcomeError) as error:
+        broker.cancel_entry(ORDER_LINK_ID)
+
+    assert "cancel_order" in str(error.value)
+    pending = broker.get_pending_entry()
+    assert pending is not None
+    assert pending.status == PendingEntryStatus.WORKING
+
+    broker.cancel_entry(ORDER_LINK_ID)
+    client.cancel_order.assert_called_once()
 
 
 def test_cancel_requested_does_not_regress_on_stale_new_snapshot() -> None:

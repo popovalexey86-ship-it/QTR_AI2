@@ -13,6 +13,7 @@ from core.exceptions import (
     RateLimitError,
     TemporaryExchangeError,
     TemporaryTransportError,
+    UnknownWriteOutcomeError,
 )
 from core.pending_entry import (
     InvalidPendingEntryTransition,
@@ -172,6 +173,13 @@ class BybitBroker(Broker):
                 category=self._category,
                 **mapped_request,
             )
+        except UnknownWriteOutcomeError:
+            return self._reconcile_unknown_submission(
+                request,
+                order_link_id=order_link_id,
+                setup_key=setup_key,
+                signal_timestamp=signal_timestamp,
+            )
         except Exception:
             raise BybitPendingEntryError(
                 "Bybit pending entry submission request failed."
@@ -191,6 +199,55 @@ class BybitBroker(Broker):
             expected=order_link_id,
         )
 
+        pending = self._register_submitted_entry(
+            request,
+            order_link_id=order_link_id,
+            setup_key=setup_key,
+            signal_timestamp=signal_timestamp,
+            exchange_order_id=exchange_order_id,
+        )
+        return EntryOrderAcknowledgement(
+            order_link_id=order_link_id,
+            exchange_order_id=pending.exchange_order_id,
+        )
+
+    def _reconcile_unknown_submission(
+        self,
+        request: TradeRequest,
+        *,
+        order_link_id: str,
+        setup_key: str,
+        signal_timestamp: datetime,
+    ) -> EntryOrderAcknowledgement:
+        try:
+            snapshot, _ = self._query_entry_order(order_link_id)
+        except Exception:
+            raise _unknown_write_outcome("place_order") from None
+        if snapshot is None:
+            raise _unknown_write_outcome("place_order")
+
+        pending = self._register_submitted_entry(
+            request,
+            order_link_id=order_link_id,
+            setup_key=setup_key,
+            signal_timestamp=signal_timestamp,
+            exchange_order_id=snapshot.exchange_order_id,
+        )
+        self._reconcile_active_entry(pending, snapshot)
+        return EntryOrderAcknowledgement(
+            order_link_id=order_link_id,
+            exchange_order_id=snapshot.exchange_order_id,
+        )
+
+    def _register_submitted_entry(
+        self,
+        request: TradeRequest,
+        *,
+        order_link_id: str,
+        setup_key: str,
+        signal_timestamp: datetime,
+        exchange_order_id: str | None,
+    ) -> PendingEntry:
         pending = PendingEntry(
             order_link_id=order_link_id,
             setup_key=setup_key,
@@ -208,10 +265,7 @@ class BybitBroker(Broker):
             previous_status=None,
         )
         self._submission_event_order_ids.add(order_link_id)
-        return EntryOrderAcknowledgement(
-            order_link_id=order_link_id,
-            exchange_order_id=exchange_order_id,
-        )
+        return pending
 
     def get_entry_order(
         self,
@@ -312,6 +366,9 @@ class BybitBroker(Broker):
                 order_link_id=order_link_id,
                 order_id=active.exchange_order_id,
             )
+        except UnknownWriteOutcomeError:
+            self._reconcile_unknown_cancellation(active)
+            return
         except Exception:
             raise BybitPendingEntryError(
                 "Bybit pending entry cancellation request failed."
@@ -359,6 +416,29 @@ class BybitBroker(Broker):
             kind=PendingEntryEventKind.STATUS_CHANGED,
             previous_status=active.status,
         )
+
+    def _reconcile_unknown_cancellation(
+        self,
+        active: PendingEntry,
+    ) -> None:
+        order_link_id = active.order_link_id
+        self._cancel_requested_order_ids.add(order_link_id)
+        try:
+            snapshot, _ = self._query_entry_order(order_link_id)
+        except Exception:
+            raise _unknown_write_outcome("cancel_order") from None
+        if snapshot is None:
+            raise _unknown_write_outcome("cancel_order")
+
+        self._reconcile_active_entry(active, snapshot)
+        if snapshot.status in (
+            PendingEntryStatus.FILLED,
+            PendingEntryStatus.CANCELLED,
+            PendingEntryStatus.REJECTED,
+            PendingEntryStatus.CANCEL_REQUESTED,
+        ):
+            return
+        raise _unknown_write_outcome("cancel_order")
 
     def recover_pending_entry(self) -> PendingEntry | None:
         self._recovering = True
@@ -1012,6 +1092,12 @@ def _snapshot_from_pending(entry: PendingEntry) -> EntryOrderSnapshot:
         requested_volume=entry.request.volume,
         filled_volume=entry.filled_volume,
         average_fill_price=entry.average_fill_price,
+    )
+
+
+def _unknown_write_outcome(operation: str) -> UnknownWriteOutcomeError:
+    return UnknownWriteOutcomeError(
+        f"Bybit write outcome remains unknown. Operation={operation}."
     )
 
 

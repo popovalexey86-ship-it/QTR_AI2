@@ -18,6 +18,10 @@ class RateLimitError(TemporaryExchangeError):
     """A read-only broker request exhausted retries after rate limiting."""
 
 
+class UnknownWriteOutcomeError(BrokerError):
+    """A broker write may have succeeded but could not be confirmed."""
+
+
 class OrderRejectedError(BrokerError):
     """
     Биржа отклонила заявку.
