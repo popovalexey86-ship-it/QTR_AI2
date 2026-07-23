@@ -95,6 +95,7 @@ def _preflight_container(
     *,
     positions: list[object] | None = None,
     owned: int = 0,
+    protective: int = 0,
     foreign: int = 0,
     durable_state: object | None = None,
 ):
@@ -105,7 +106,11 @@ def _preflight_container(
     collector.collect_completed.return_value = _market_data()
     broker = Mock()
     broker.get_positions.return_value = positions or []
-    broker.inspect_active_order_counts.return_value = (owned, foreign)
+    broker.inspect_active_order_counts.return_value = (
+        owned,
+        protective,
+        foreign,
+    )
     client = Mock()
     return SimpleNamespace(
         config=config,
@@ -135,25 +140,26 @@ def test_clean_preflight_is_ready_and_uses_exact_read_only_sequence(
         call.load(),
         call.collect(),
         call.positions(),
-        call.orders(),
+        call.orders([]),
     ]
     container.client.place_order.assert_not_called()
     container.client.cancel_order.assert_not_called()
 
 
 @pytest.mark.parametrize(
-    ("positions", "owned", "foreign", "durable", "reason"),
+    ("positions", "owned", "protective", "foreign", "durable", "reason"),
     [
-        ([object()], 0, 0, None, "Open position"),
-        ([], 1, 0, None, "QTR-owned"),
-        ([], 0, 1, None, "Foreign"),
-        ([], 0, 0, object(), "Durable"),
+        ([object()], 0, 0, 0, None, "Open position"),
+        ([], 1, 0, 0, None, "QTR-owned"),
+        ([], 0, 0, 1, None, "Foreign"),
+        ([], 0, 0, 0, object(), "Durable"),
     ],
 )
 def test_preflight_blocking_conditions(
     tmp_path: Path,
     positions: list[object],
     owned: int,
+    protective: int,
     foreign: int,
     durable: object | None,
     reason: str,
@@ -162,6 +168,7 @@ def test_preflight_blocking_conditions(
         tmp_path,
         positions=positions,
         owned=owned,
+        protective=protective,
         foreign=foreign,
         durable_state=durable,
     )
@@ -172,6 +179,29 @@ def test_preflight_blocking_conditions(
     assert reason in (report.blocking_reason or "")
     container.client.place_order.assert_not_called()
     container.client.cancel_order.assert_not_called()
+
+
+def test_protected_position_is_ready_and_summary_separates_orders(
+    tmp_path: Path,
+) -> None:
+    position = object()
+    container = _preflight_container(
+        tmp_path,
+        positions=[position],
+        protective=2,
+    )
+
+    report = run_bybit_testnet_preflight(container)
+
+    assert report.ready is True
+    assert report.open_position_count == 1
+    assert report.protective_active_order_count == 2
+    assert report.foreign_active_order_count == 0
+    assert "Protective orders: 2" in report.summary()
+    assert "Foreign/manual active order count: 0" in report.summary()
+    container.broker.inspect_active_order_counts.assert_called_once_with(
+        [position]
+    )
 
 
 @pytest.mark.parametrize("failure_stage", ["state", "candles", "private"])

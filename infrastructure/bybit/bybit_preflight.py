@@ -14,6 +14,7 @@ class BybitTestnetPreflightReport:
     completed_candle_count: int
     open_position_count: int
     owned_active_order_count: int
+    protective_active_order_count: int
     foreign_active_order_count: int
     durable_state_present: bool
     ready: bool
@@ -34,6 +35,7 @@ class BybitTestnetPreflightReport:
                 f"Completed candle count: {self.completed_candle_count}",
                 f"Open position count: {self.open_position_count}",
                 f"QTR-owned active order count: {self.owned_active_order_count}",
+                f"Protective orders: {self.protective_active_order_count}",
                 f"Foreign/manual active order count: {self.foreign_active_order_count}",
                 "Durable pending state: "
                 + ("PRESENT" if self.durable_state_present else "ABSENT"),
@@ -64,7 +66,9 @@ def run_bybit_testnet_preflight(container: Container) -> BybitTestnetPreflightRe
 
     try:
         positions = container.broker.get_positions()
-        owned_count, foreign_count = container.broker.inspect_active_order_counts()
+        owned_count, protective_count, foreign_count = (
+            container.broker.inspect_active_order_counts(positions)
+        )
     except Exception:
         return BybitTestnetPreflightReport(
             connectivity_ok=True,
@@ -75,6 +79,7 @@ def run_bybit_testnet_preflight(container: Container) -> BybitTestnetPreflightRe
             completed_candle_count=market_data.count,
             open_position_count=0,
             owned_active_order_count=0,
+            protective_active_order_count=0,
             foreign_active_order_count=0,
             durable_state_present=durable_state is not None,
             ready=False,
@@ -82,7 +87,12 @@ def run_bybit_testnet_preflight(container: Container) -> BybitTestnetPreflightRe
         )
 
     reasons: list[str] = []
-    if positions:
+    if positions and not (
+        len(positions) == 1
+        and protective_count > 0
+        and owned_count == 0
+        and foreign_count == 0
+    ):
         reasons.append("Open position exists.")
     if owned_count:
         reasons.append("QTR-owned active order exists.")
@@ -99,6 +109,7 @@ def run_bybit_testnet_preflight(container: Container) -> BybitTestnetPreflightRe
         completed_candle_count=market_data.count,
         open_position_count=len(positions),
         owned_active_order_count=owned_count,
+        protective_active_order_count=protective_count,
         foreign_active_order_count=foreign_count,
         durable_state_present=durable_state is not None,
         ready=not reasons,
@@ -121,6 +132,7 @@ def _failed_report(
         completed_candle_count=0,
         open_position_count=0,
         owned_active_order_count=0,
+        protective_active_order_count=0,
         foreign_active_order_count=0,
         durable_state_present=durable_state_present,
         ready=False,

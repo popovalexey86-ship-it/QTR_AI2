@@ -6,6 +6,7 @@ import time
 from typing import Any
 
 from core.broker import Broker
+from core.decision import Decision
 from core.entry_order import EntryOrderAcknowledgement, EntryOrderSnapshot
 from core.exceptions import (
     BrokerError,
@@ -484,7 +485,16 @@ class BybitBroker(Broker):
             ) from None
 
         active_orders = self._list_active_exchange_orders()
-        owned_orders, foreign_orders = _classify_active_orders(active_orders)
+        owned_orders, protective_orders, foreign_orders = (
+            _classify_active_orders(active_orders)
+        )
+        open_position: Position | None = None
+        if foreign_orders:
+            open_position = self._safe_get_open_position_for_recovery()
+            positions = () if open_position is None else (open_position,)
+            owned_orders, protective_orders, foreign_orders = (
+                _classify_active_orders(active_orders, positions)
+            )
         if foreign_orders:
             raise BybitActiveOrderConflictError(
                 "A foreign or manual active order blocks QTR recovery."
@@ -504,6 +514,10 @@ class BybitBroker(Broker):
 
         restored = persisted.pending_entry
         self._validate_recovery_state(restored)
+        if protective_orders:
+            raise BybitPendingEntryRecoveryError(
+                "An open protected position conflicts with durable pending state."
+            )
         if owned_orders:
             owned_item = owned_orders[0]
             owned_order_link_id = _order_link_id(owned_item)
@@ -512,7 +526,10 @@ class BybitBroker(Broker):
                     "Durable state does not match the active QTR order."
                 )
             self._validate_exchange_order_scope(owned_item)
-            if self._safe_get_open_position_for_recovery() is not None:
+            if (
+                open_position is not None
+                or self._safe_get_open_position_for_recovery() is not None
+            ):
                 raise BybitPendingEntryRecoveryError(
                     "An open position and active entry order are ambiguous."
                 )
@@ -671,10 +688,16 @@ class BybitBroker(Broker):
         self._pending_entry_events.clear()
         return events
 
-    def inspect_active_order_counts(self) -> tuple[int, int]:
+    def inspect_active_order_counts(
+        self,
+        positions: list[Position] | tuple[Position, ...] = (),
+    ) -> tuple[int, int, int]:
         active_orders = self._list_active_exchange_orders()
-        owned, foreign = _classify_active_orders(active_orders)
-        return len(owned), len(foreign)
+        owned, protective, foreign = _classify_active_orders(
+            active_orders,
+            tuple(positions),
+        )
+        return len(owned), len(protective), len(foreign)
 
     def _queue_pending_event(
         self,
@@ -789,7 +812,7 @@ class BybitBroker(Broker):
 
     def _ensure_submission_has_no_active_order_conflict(self) -> None:
         active_orders = self._list_active_exchange_orders()
-        owned_orders, foreign_orders = _classify_active_orders(active_orders)
+        owned_orders, _, foreign_orders = _classify_active_orders(active_orders)
         if foreign_orders:
             raise BybitActiveOrderConflictError(
                 "A foreign or manual active order blocks submission."
@@ -1121,16 +1144,60 @@ def _is_stale_snapshot(
 
 def _classify_active_orders(
     orders: tuple[Mapping[str, Any], ...],
-) -> tuple[tuple[Mapping[str, Any], ...], tuple[Mapping[str, Any], ...]]:
+    positions: tuple[Position, ...] = (),
+) -> tuple[
+    tuple[Mapping[str, Any], ...],
+    tuple[Mapping[str, Any], ...],
+    tuple[Mapping[str, Any], ...],
+]:
     owned: list[Mapping[str, Any]] = []
+    protective: list[Mapping[str, Any]] = []
     foreign: list[Mapping[str, Any]] = []
     for item in orders:
         order_link_id = item.get("orderLinkId")
         if isinstance(order_link_id, str) and order_link_id.startswith("QTR-"):
             owned.append(item)
+        elif _is_protective_order(item, positions):
+            protective.append(item)
         else:
             foreign.append(item)
-    return tuple(owned), tuple(foreign)
+    return tuple(owned), tuple(protective), tuple(foreign)
+
+
+_PROTECTIVE_STOP_ORDER_TYPES = frozenset(
+    {
+        "TakeProfit",
+        "StopLoss",
+        "PartialTakeProfit",
+        "PartialStopLoss",
+    }
+)
+
+
+def _is_protective_order(
+    item: Mapping[str, Any],
+    positions: tuple[Position, ...],
+) -> bool:
+    if len(positions) != 1:
+        return False
+    position = positions[0]
+
+    symbol = item.get("symbol")
+    if (
+        not isinstance(symbol, str)
+        or symbol.strip().upper() != position.symbol.strip().upper()
+    ):
+        return False
+    if item.get("stopOrderType") not in _PROTECTIVE_STOP_ORDER_TYPES:
+        return False
+    if (
+        item.get("reduceOnly") is not True
+        and item.get("closeOnTrigger") is not True
+    ):
+        return False
+
+    closing_side = "Sell" if position.decision == Decision.BUY else "Buy"
+    return item.get("side") == closing_side
 
 
 def _order_link_id(item: Mapping[str, Any]) -> str:
