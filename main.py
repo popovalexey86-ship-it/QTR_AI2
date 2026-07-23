@@ -4,6 +4,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from config.bootstrap import create_notifier, create_trading_engine
+from core.exceptions import TemporaryExchangeError, TemporaryTransportError
 from core.logger import logger
 from core.notification import NotificationError, NotificationPort
 from engine.trading_engine import TradingEngine
@@ -18,6 +19,50 @@ class LiveTestnetRequiredError(RuntimeError):
 
 class LiveConfigurationError(RuntimeError):
     """Raised when live Testnet configuration is incomplete or unsafe."""
+
+
+_RUNTIME_ALERT_INTERVAL_SECONDS = 300.0
+_TEMPORARY_RUNTIME_ERRORS = (
+    TemporaryTransportError,
+    TemporaryExchangeError,
+)
+
+
+class RuntimeBackoff:
+    """Bounded backoff for consecutive temporary runtime failures."""
+
+    def __init__(self) -> None:
+        self._consecutive_failures = 0
+
+    def next_delay(self) -> float:
+        delay = min(5.0 * (2 ** self._consecutive_failures), 60.0)
+        self._consecutive_failures += 1
+        return delay
+
+    def reset(self) -> None:
+        self._consecutive_failures = 0
+
+
+class RuntimeFailureAlertDeduplicator:
+    """Throttle identical successful runtime-failure notifications."""
+
+    def __init__(
+        self,
+        interval_seconds: float = _RUNTIME_ALERT_INTERVAL_SECONDS,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
+        self._interval_seconds = interval_seconds
+        self._clock = clock or time.monotonic
+        self._last_notified_at: dict[str, float] = {}
+
+    def should_notify(self, failure_key: str) -> bool:
+        last_notified_at = self._last_notified_at.get(failure_key)
+        if last_notified_at is None:
+            return True
+        return self._clock() - last_notified_at >= self._interval_seconds
+
+    def record_notification(self, failure_key: str) -> None:
+        self._last_notified_at[failure_key] = self._clock()
 
 
 def build_trading_engine() -> tuple[Container, TradingEngine]:
@@ -70,11 +115,27 @@ def testnet_preflight() -> None:
     print(report.summary())
 
 
-def _notify_runtime_event(event: str, callback: Callable[[], None]) -> None:
+def _notify_runtime_event(event: str, callback: Callable[[], None]) -> bool:
     try:
         callback()
     except NotificationError:
         logger.error("Runtime notification failed. Event=%s", event)
+        return False
+    return True
+
+
+def _notify_runtime_failure(
+    notifier: NotificationPort,
+    deduplicator: RuntimeFailureAlertDeduplicator,
+    error_message: str,
+) -> None:
+    if not deduplicator.should_notify(error_message):
+        return
+    if _notify_runtime_event(
+        "failed",
+        lambda: notifier.runtime_failed(error_message),
+    ):
+        deduplicator.record_notification(error_message)
 
 
 def run_trading_cycle(
@@ -92,16 +153,35 @@ def run_trading_cycle(
     if notifier is None:
         notifier = create_notifier(container.config)
 
-    try:
-        engine.recover_runtime_state()
-    except Exception as error:
-        error_message = f"Runtime recovery failed: {type(error).__name__}"
-        logger.error(error_message)
-        _notify_runtime_event(
-            "failed",
-            lambda: notifier.runtime_failed(error_message),
-        )
-        return
+    failure_alerts = RuntimeFailureAlertDeduplicator()
+    temporary_backoff = RuntimeBackoff()
+
+    while True:
+        try:
+            engine.recover_runtime_state()
+            temporary_backoff.reset()
+            break
+        except _TEMPORARY_RUNTIME_ERRORS as error:
+            error_message = (
+                "Runtime recovery temporary error: "
+                f"{type(error).__name__}"
+            )
+            logger.warning(error_message)
+            _notify_runtime_failure(
+                notifier,
+                failure_alerts,
+                error_message,
+            )
+            time.sleep(temporary_backoff.next_delay())
+        except Exception as error:
+            error_message = f"Runtime recovery failed: {type(error).__name__}"
+            logger.error(error_message)
+            _notify_runtime_failure(
+                notifier,
+                failure_alerts,
+                error_message,
+            )
+            return
 
     successful_analysis_timestamp: datetime | None = None
     logger.info("Trading cycle started.")
@@ -109,8 +189,8 @@ def run_trading_cycle(
     try:
         while True:
             try:
-                market_data = container.collector.collect_completed()
                 engine.poll_runtime_state()
+                market_data = container.collector.collect_completed()
                 completed_timestamps = tuple(
                     candle.timestamp for candle in market_data.candles
                 )
@@ -136,13 +216,28 @@ def run_trading_cycle(
                     successful_analysis_timestamp = latest_timestamp
                     logger.info("Waiting for new candle...")
 
+                temporary_backoff.reset()
                 time.sleep(5)
+            except _TEMPORARY_RUNTIME_ERRORS as error:
+                error_message = (
+                    "Trading loop temporary error: "
+                    f"{type(error).__name__}"
+                )
+                logger.warning(error_message)
+                _notify_runtime_failure(
+                    notifier,
+                    failure_alerts,
+                    error_message,
+                )
+                time.sleep(temporary_backoff.next_delay())
             except Exception as error:
+                temporary_backoff.reset()
                 error_message = f"Trading loop error: {type(error).__name__}"
                 logger.error(error_message)
-                _notify_runtime_event(
-                    "failed",
-                    lambda: notifier.runtime_failed(error_message),
+                _notify_runtime_failure(
+                    notifier,
+                    failure_alerts,
+                    error_message,
                 )
                 time.sleep(10)
     except KeyboardInterrupt:

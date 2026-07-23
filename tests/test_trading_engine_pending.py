@@ -8,6 +8,7 @@ from core.analysis_context import AnalysisContext
 from core.candle import Candle
 from core.decision_engine import DecisionEngine
 from core.execution import Execution
+from core.exceptions import TemporaryTransportError
 from core.market_data import MarketData
 from core.pending_entry import PendingEntryStatus, build_setup_key
 from core.position_monitor import PositionMonitor
@@ -254,9 +255,32 @@ def test_runtime_recovery_and_poll_use_explicit_facade_order() -> None:
     assert parent.mock_calls == [
         call.recover(),
         call.monitor(),
-        call.monitor(),
         call.refresh(),
+        call.monitor(),
     ]
+
+
+def test_position_timeout_does_not_block_pending_refresh() -> None:
+    execution = Mock()
+    expected_pending = Mock()
+    execution.refresh_pending_entry.return_value = expected_pending
+    position_monitor = Mock()
+    position_monitor.update.side_effect = TemporaryTransportError(
+        "temporary position failure"
+    )
+    engine = TradingEngine(
+        strategy=Mock(),
+        decision_engine=Mock(),
+        risk_manager=Mock(),
+        execution=execution,
+        position_monitor=position_monitor,
+    )
+
+    with pytest.raises(TemporaryTransportError):
+        engine.poll_runtime_state()
+
+    execution.refresh_pending_entry.assert_called_once_with()
+    position_monitor.update.assert_called_once_with()
 
 
 def test_trading_engine_age_facade_delegates_without_bybit_dependency() -> None:

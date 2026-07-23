@@ -9,6 +9,7 @@ import pytest
 import main
 from backtesting.historical_data import HistoricalDataResult
 from core.candle import Candle
+from core.exceptions import TemporaryExchangeError, TemporaryTransportError
 from core.market_data import MarketData
 from core.notification import NotificationError
 
@@ -146,6 +147,80 @@ def test_runtime_recovery_failure_aborts_before_started_or_collection(monkeypatc
     assert "private.example" not in logged
 
 
+def test_temporary_recovery_retries_without_starting_trading_early(monkeypatch):
+    container, engine, notifier = make_runtime()
+    engine.recover_runtime_state.side_effect = [
+        TemporaryTransportError("private transport detail"),
+        None,
+    ]
+    container.collector.collect_completed.side_effect = KeyboardInterrupt
+    sleep = Mock()
+    logger = Mock()
+    monkeypatch.setattr(main.time, "sleep", sleep)
+    monkeypatch.setattr(main, "logger", logger)
+
+    main.run_trading_cycle(container, engine, notifier)
+
+    assert engine.recover_runtime_state.call_count == 2
+    sleep.assert_called_once_with(5.0)
+    notifier.runtime_failed.assert_called_once_with(
+        "Runtime recovery temporary error: TemporaryTransportError"
+    )
+    notifier.runtime_started.assert_called_once_with()
+    container.collector.collect_completed.assert_called_once_with()
+
+
+def test_candle_timeout_does_not_block_private_reconciliation(monkeypatch):
+    container, engine, notifier = make_runtime()
+    events: list[str] = []
+    engine.poll_runtime_state.side_effect = lambda: events.append("private")
+
+    def collect() -> MarketData:
+        events.append("candles")
+        if events.count("candles") == 1:
+            raise TemporaryTransportError("private candle transport detail")
+        raise KeyboardInterrupt
+
+    container.collector.collect_completed.side_effect = collect
+    sleep = Mock()
+    monkeypatch.setattr(main.time, "sleep", sleep)
+    monkeypatch.setattr(main, "logger", Mock())
+
+    main.run_trading_cycle(container, engine, notifier)
+
+    assert events == ["private", "candles", "private", "candles"]
+    assert engine.poll_runtime_state.call_count == 2
+    sleep.assert_called_once_with(5.0)
+    engine.age_pending_entry.assert_not_called()
+    engine.process.assert_not_called()
+
+
+def test_identical_temporary_failures_are_deduplicated_and_runtime_stays_alive(
+    monkeypatch,
+):
+    container, engine, notifier = make_runtime()
+    container.collector.collect_completed.side_effect = [
+        TemporaryExchangeError("unsafe first detail"),
+        TemporaryExchangeError("unsafe second detail"),
+        KeyboardInterrupt,
+    ]
+    sleep = Mock()
+    monotonic = Mock(side_effect=[0.0, 60.0])
+    monkeypatch.setattr(main.time, "sleep", sleep)
+    monkeypatch.setattr(main.time, "monotonic", monotonic)
+    monkeypatch.setattr(main, "logger", Mock())
+
+    main.run_trading_cycle(container, engine, notifier)
+
+    assert engine.poll_runtime_state.call_count == 3
+    assert container.collector.collect_completed.call_count == 3
+    assert sleep.call_args_list == [call(5.0), call(10.0)]
+    notifier.runtime_failed.assert_called_once_with(
+        "Trading loop temporary error: TemporaryExchangeError"
+    )
+    notifier.runtime_stopped.assert_called_once_with()
+
+
 def test_first_completed_collection_polls_and_ages_without_analysis(monkeypatch):
     container, engine, notifier = make_runtime()
     baseline = completed_market_data(15)
@@ -158,7 +233,7 @@ def test_first_completed_collection_polls_and_ages_without_analysis(monkeypatch)
 
     main.run_trading_cycle(container, engine, notifier)
 
-    engine.poll_runtime_state.assert_called_once_with()
+    assert engine.poll_runtime_state.call_count == 2
     engine.age_pending_entry.assert_called_once_with(
         (baseline.last.timestamp,),
         ttl_candles=4,
@@ -180,7 +255,7 @@ def test_unchanged_completed_candle_still_polls_without_reaging(monkeypatch):
 
     main.run_trading_cycle(container, engine, notifier)
 
-    assert engine.poll_runtime_state.call_count == 2
+    assert engine.poll_runtime_state.call_count == 3
     engine.age_pending_entry.assert_called_once()
     engine.process.assert_not_called()
 
@@ -206,6 +281,7 @@ def test_new_candle_call_order_is_poll_then_age_then_process(monkeypatch):
         call.poll_runtime_state(),
         call.age_pending_entry((newer.last.timestamp,), ttl_candles=4),
         call.process(newer),
+        call.poll_runtime_state(),
     ]
 
 
@@ -243,7 +319,7 @@ def test_completed_timestamp_regression_fails_closed_for_iteration(monkeypatch):
 
     main.run_trading_cycle(container, engine, notifier)
 
-    assert engine.poll_runtime_state.call_count == 2
+    assert engine.poll_runtime_state.call_count == 3
     engine.age_pending_entry.assert_called_once()
     engine.process.assert_not_called()
     notifier.runtime_failed.assert_called_once_with(

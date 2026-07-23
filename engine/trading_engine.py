@@ -48,8 +48,8 @@ class TradingEngine:
         return pending
 
     def poll_runtime_state(self) -> PendingEntry | None:
-        self._position_monitor.update()
         pending = self._execution.refresh_pending_entry()
+        self._position_monitor.update()
         self._deliver_pending_entry_events()
         return pending
 
