@@ -1,13 +1,18 @@
 from dataclasses import dataclass
 from datetime import datetime
 
+from core.exceptions import (
+    BrokerError,
+    TemporaryExchangeError,
+    TemporaryTransportError,
+)
 from infrastructure.container import Container
 
 
 @dataclass(frozen=True, slots=True)
 class BybitTestnetPreflightReport:
     connectivity_ok: bool
-    private_api_ok: bool
+    private_api_ok: bool | None
     symbol: str
     interval: str
     latest_completed_candle_timestamp: datetime | None
@@ -21,10 +26,17 @@ class BybitTestnetPreflightReport:
     blocking_reason: str | None
 
     def summary(self) -> str:
+        private_api_status = (
+            "OK"
+            if self.private_api_ok is True
+            else "FAILED"
+            if self.private_api_ok is False
+            else "UNKNOWN"
+        )
         return "\n".join(
             (
                 f"Testnet connectivity: {'OK' if self.connectivity_ok else 'FAILED'}",
-                f"Authenticated private API: {'OK' if self.private_api_ok else 'FAILED'}",
+                f"Authenticated private API: {private_api_status}",
                 f"Symbol / interval: {self.symbol} / {self.interval}",
                 "Latest completed candle: "
                 + (
@@ -69,21 +81,41 @@ def run_bybit_testnet_preflight(container: Container) -> BybitTestnetPreflightRe
         owned_count, protective_count, foreign_count = (
             container.broker.inspect_active_order_counts(positions)
         )
-    except Exception:
-        return BybitTestnetPreflightReport(
-            connectivity_ok=True,
-            private_api_ok=False,
-            symbol=config.trade_symbol,
-            interval=config.trade_interval,
-            latest_completed_candle_timestamp=market_data.last.timestamp,
+    except (TemporaryTransportError, TemporaryExchangeError):
+        return _private_api_failure_report(
+            container,
+            latest_timestamp=market_data.last.timestamp,
             completed_candle_count=market_data.count,
-            open_position_count=0,
-            owned_active_order_count=0,
-            protective_active_order_count=0,
-            foreign_active_order_count=0,
             durable_state_present=durable_state is not None,
-            ready=False,
-            blocking_reason="Authenticated private API check failed.",
+            private_api_ok=None,
+            reason="Private API transport or exchange check failed.",
+        )
+    except (ValueError, TypeError, KeyError):
+        return _private_api_failure_report(
+            container,
+            latest_timestamp=market_data.last.timestamp,
+            completed_candle_count=market_data.count,
+            durable_state_present=durable_state is not None,
+            private_api_ok=True,
+            reason="Private API response mapping failed.",
+        )
+    except BrokerError:
+        return _private_api_failure_report(
+            container,
+            latest_timestamp=market_data.last.timestamp,
+            completed_candle_count=market_data.count,
+            durable_state_present=durable_state is not None,
+            private_api_ok=False,
+            reason="Authenticated private API check failed.",
+        )
+    except Exception:
+        return _private_api_failure_report(
+            container,
+            latest_timestamp=market_data.last.timestamp,
+            completed_candle_count=market_data.count,
+            durable_state_present=durable_state is not None,
+            private_api_ok=None,
+            reason="Private API check failed with an unexpected local error.",
         )
 
     reasons: list[str] = []
@@ -125,11 +157,37 @@ def _failed_report(
 ) -> BybitTestnetPreflightReport:
     return BybitTestnetPreflightReport(
         connectivity_ok=False,
-        private_api_ok=False,
+        private_api_ok=None,
         symbol=container.config.trade_symbol,
         interval=container.config.trade_interval,
         latest_completed_candle_timestamp=None,
         completed_candle_count=0,
+        open_position_count=0,
+        owned_active_order_count=0,
+        protective_active_order_count=0,
+        foreign_active_order_count=0,
+        durable_state_present=durable_state_present,
+        ready=False,
+        blocking_reason=reason,
+    )
+
+
+def _private_api_failure_report(
+    container: Container,
+    *,
+    latest_timestamp: datetime,
+    completed_candle_count: int,
+    durable_state_present: bool,
+    private_api_ok: bool | None,
+    reason: str,
+) -> BybitTestnetPreflightReport:
+    return BybitTestnetPreflightReport(
+        connectivity_ok=True,
+        private_api_ok=private_api_ok,
+        symbol=container.config.trade_symbol,
+        interval=container.config.trade_interval,
+        latest_completed_candle_timestamp=latest_timestamp,
+        completed_candle_count=completed_candle_count,
         open_position_count=0,
         owned_active_order_count=0,
         protective_active_order_count=0,

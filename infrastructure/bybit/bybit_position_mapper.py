@@ -38,8 +38,16 @@ class BybitPositionMapper:
             symbol=position["symbol"],
             decision=decision,
             entry=float(position["avgPrice"]),
-            stop_loss=float(position.get("stopLoss", 0)),
-            take_profit=float(position.get("takeProfit", 0)),
+            stop_loss=_optional_number(position.get("stopLoss")),
+            take_profit=_optional_number(position.get("takeProfit")),
             volume=float(position["size"]),
             opened_at=datetime.now(UTC),
         )
+
+
+def _optional_number(value: object) -> float:
+    if value is None or value == "":
+        return 0.0
+    if not isinstance(value, (str, int, float)):
+        raise TypeError("Optional position number has an unsupported type.")
+    return float(value)

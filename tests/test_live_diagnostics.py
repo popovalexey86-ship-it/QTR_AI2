@@ -7,6 +7,7 @@ import pytest
 
 import main
 from core.candle import Candle
+from core.exceptions import BrokerError, TemporaryTransportError
 from core.market_data import MarketData
 from infrastructure.bybit.bybit_preflight import run_bybit_testnet_preflight
 import infrastructure.bybit.bybit_client as client_module
@@ -202,6 +203,50 @@ def test_protected_position_is_ready_and_summary_separates_orders(
     container.broker.inspect_active_order_counts.assert_called_once_with(
         [position]
     )
+
+
+@pytest.mark.parametrize(
+    ("failure", "private_api_ok", "status", "reason"),
+    [
+        (
+            BrokerError("unsafe authentication detail"),
+            False,
+            "FAILED",
+            "Authenticated private API",
+        ),
+        (
+            TemporaryTransportError("unsafe transport detail"),
+            None,
+            "UNKNOWN",
+            "transport or exchange",
+        ),
+        (
+            ValueError("unsafe position payload"),
+            True,
+            "OK",
+            "response mapping",
+        ),
+    ],
+    ids=("authentication", "transport", "mapping"),
+)
+def test_preflight_distinguishes_private_api_failure_classes(
+    tmp_path: Path,
+    failure: Exception,
+    private_api_ok: bool | None,
+    status: str,
+    reason: str,
+) -> None:
+    container = _preflight_container(tmp_path)
+    container.broker.get_positions.side_effect = failure
+
+    report = run_bybit_testnet_preflight(container)
+    summary = report.summary()
+
+    assert report.private_api_ok is private_api_ok
+    assert f"Authenticated private API: {status}" in summary
+    assert reason in (report.blocking_reason or "")
+    assert "unsafe" not in summary
+    container.broker.inspect_active_order_counts.assert_not_called()
 
 
 @pytest.mark.parametrize("failure_stage", ["state", "candles", "private"])
