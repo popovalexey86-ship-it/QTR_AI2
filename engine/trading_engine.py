@@ -9,7 +9,11 @@ from core.execution import Execution
 from core.risk_manager import RiskManager
 from core.decision_engine import DecisionEngine
 from core.position_monitor import PositionMonitor
-from core.pending_entry import PendingEntry
+from core.pending_entry import (
+    PendingEntry,
+    build_order_link_id,
+    build_setup_key,
+)
 from core.notification import NotificationError, NotificationPort
 from strategies.strategy import Strategy
 
@@ -88,12 +92,34 @@ class TradingEngine:
 
         logger.info("Trading cycle started.")
         self._position_monitor.update()
+        signal_timestamp = market_data.last.timestamp
+        current_market_price = market_data.last.close
 
         if self._position_monitor.has_open_position():
+            _log_setup_evaluation(
+                outcome="rejected",
+                reason="open_position_exists",
+                setup_timestamp=None,
+                signal_timestamp=signal_timestamp,
+                setup_id=None,
+                setup_key=None,
+                calculated_entry=None,
+                current_market_price=current_market_price,
+            )
             logger.info("Open position already exists. Skipping trade.")
             return
 
         if self._execution.has_pending_entry():
+            _log_setup_evaluation(
+                outcome="rejected",
+                reason="pending_entry_exists",
+                setup_timestamp=None,
+                signal_timestamp=signal_timestamp,
+                setup_id=None,
+                setup_key=None,
+                calculated_entry=None,
+                current_market_price=current_market_price,
+            )
             logger.info("Pending entry already exists. Skipping trade.")
             return
 
@@ -104,6 +130,16 @@ class TradingEngine:
         )
 
         if context.setup is None:
+            _log_setup_evaluation(
+                outcome="rejected",
+                reason="setup_not_found",
+                setup_timestamp=None,
+                signal_timestamp=signal_timestamp,
+                setup_id=None,
+                setup_key=None,
+                calculated_entry=None,
+                current_market_price=current_market_price,
+            )
             logger.info("Setup not found.")
             return
 
@@ -117,6 +153,16 @@ class TradingEngine:
         logger.info(f"Decision: {decision.name}")
 
         if decision == Decision.SKIP:
+            _log_setup_evaluation(
+                outcome="rejected",
+                reason="decision_skip",
+                setup_timestamp=context.setup.timestamp,
+                signal_timestamp=signal_timestamp,
+                setup_id=None,
+                setup_key=None,
+                calculated_entry=context.setup.entry,
+                current_market_price=current_market_price,
+            )
             logger.info("Trade skipped.")
             return
 
@@ -126,6 +172,15 @@ class TradingEngine:
             context.setup,
             decision,
         )
+        setup_key = build_setup_key(
+            symbol=market_data.symbol,
+            direction=request.decision,
+            setup_timestamp=context.setup.timestamp,
+            entry=request.entry,
+            stop_loss=request.stop_loss,
+            take_profit=request.take_profit,
+        )
+        setup_id = build_order_link_id(setup_key)
 
         logger.info("Submitting pending entry to broker.")
 
@@ -134,18 +189,69 @@ class TradingEngine:
             pending = self._execution.submit_pending_entry(
                 request,
                 setup_timestamp=context.setup.timestamp,
-                signal_timestamp=market_data.last.timestamp,
+                signal_timestamp=signal_timestamp,
                 authoritative_symbol=market_data.symbol,
             )
         except DuplicatePendingSetupError:
+            _log_setup_evaluation(
+                outcome="rejected",
+                reason="duplicate_setup",
+                setup_timestamp=context.setup.timestamp,
+                signal_timestamp=signal_timestamp,
+                setup_id=setup_id,
+                setup_key=setup_key,
+                calculated_entry=request.entry,
+                current_market_price=current_market_price,
+            )
             logger.info("Duplicate setup suppressed.")
             return
 
+        _log_setup_evaluation(
+            outcome="accepted",
+            reason="pending_entry_submitted",
+            setup_timestamp=context.setup.timestamp,
+            signal_timestamp=signal_timestamp,
+            setup_id=pending.order_link_id,
+            setup_key=pending.setup_key,
+            calculated_entry=request.entry,
+            current_market_price=current_market_price,
+        )
         logger.info(
-            "Pending entry submitted. OrderLinkId=%s ExchangeOrderId=%s",
+            "Pending entry submitted. OrderLinkId=%s ExchangeOrderId=%s "
+            "SetupTimestamp=%s SignalTimestamp=%s Entry=%s MarketPrice=%s",
             pending.order_link_id,
             pending.exchange_order_id,
+            context.setup.timestamp.isoformat(),
+            signal_timestamp.isoformat(),
+            request.entry,
+            current_market_price,
         )
         self._deliver_pending_entry_events()
 
         logger.info("Trading cycle completed.")
+
+
+def _log_setup_evaluation(
+    *,
+    outcome: str,
+    reason: str,
+    setup_timestamp: datetime | None,
+    signal_timestamp: datetime,
+    setup_id: str | None,
+    setup_key: str | None,
+    calculated_entry: float | None,
+    current_market_price: float,
+) -> None:
+    logger.info(
+        "Setup evaluation | outcome=%s reason=%s setup_timestamp=%s "
+        "signal_timestamp=%s setup_id=%s setup_key=%s "
+        "calculated_entry=%s current_market_price=%s",
+        outcome,
+        reason,
+        None if setup_timestamp is None else setup_timestamp.isoformat(),
+        signal_timestamp.isoformat(),
+        setup_id,
+        setup_key,
+        calculated_entry,
+        current_market_price,
+    )

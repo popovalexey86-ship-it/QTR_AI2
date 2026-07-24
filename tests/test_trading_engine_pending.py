@@ -6,11 +6,16 @@ import pytest
 from backtesting.simulated_broker import SimulatedBroker, SimulatedOrderRejected
 from core.analysis_context import AnalysisContext
 from core.candle import Candle
+from core.decision import Decision
 from core.decision_engine import DecisionEngine
 from core.execution import Execution
 from core.exceptions import TemporaryTransportError
 from core.market_data import MarketData
-from core.pending_entry import PendingEntryStatus, build_setup_key
+from core.pending_entry import (
+    PendingEntryStatus,
+    build_order_link_id,
+    build_setup_key,
+)
 from core.position_monitor import PositionMonitor
 from core.risk_manager import RiskManager
 from core.setup import Setup
@@ -192,6 +197,77 @@ def test_same_setup_is_not_recreated_after_rejection() -> None:
 
     assert broker.rejected_entry_count == 1
     assert broker.submitted_entry_count == 1
+
+
+def test_closed_position_does_not_reenter_same_setup_and_logs_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repeated_setup = setup()
+    strategy = ScriptedStrategy([repeated_setup, repeated_setup])
+    engine, _, broker = engine_parts(strategy)
+    structured_logger = Mock()
+    monkeypatch.setattr(
+        "engine.trading_engine.logger",
+        structured_logger,
+    )
+    first_signal = market_data(0)
+
+    engine.process(first_signal)
+    broker.update_market(market_data(1).last)
+    engine.poll_runtime_state()
+    position = broker.get_open_position()
+    assert position is not None
+    broker.close_position(position)
+    engine.poll_runtime_state()
+    second_signal = market_data(2)
+
+    engine.process(second_signal)
+
+    setup_key = build_setup_key(
+        symbol="BTCUSDT",
+        direction=Decision.BUY,
+        setup_timestamp=repeated_setup.timestamp,
+        entry=100.0,
+        stop_loss=95.0,
+        take_profit=110.0,
+    )
+    setup_id = build_order_link_id(setup_key)
+    evaluation_calls = [
+        item
+        for item in structured_logger.info.call_args_list
+        if item.args
+        and item.args[0].startswith("Setup evaluation |")
+    ]
+    assert evaluation_calls == [
+        call(
+            "Setup evaluation | outcome=%s reason=%s setup_timestamp=%s "
+            "signal_timestamp=%s setup_id=%s setup_key=%s "
+            "calculated_entry=%s current_market_price=%s",
+            "accepted",
+            "pending_entry_submitted",
+            repeated_setup.timestamp.isoformat(),
+            first_signal.last.timestamp.isoformat(),
+            setup_id,
+            setup_key,
+            100.0,
+            first_signal.last.close,
+        ),
+        call(
+            "Setup evaluation | outcome=%s reason=%s setup_timestamp=%s "
+            "signal_timestamp=%s setup_id=%s setup_key=%s "
+            "calculated_entry=%s current_market_price=%s",
+            "rejected",
+            "duplicate_setup",
+            repeated_setup.timestamp.isoformat(),
+            second_signal.last.timestamp.isoformat(),
+            setup_id,
+            setup_key,
+            100.0,
+            second_signal.last.close,
+        ),
+    ]
+    assert broker.submitted_entry_count == 1
+    assert broker.get_pending_entry() is None
 
 
 def test_new_setup_may_submit_after_terminal_completion() -> None:

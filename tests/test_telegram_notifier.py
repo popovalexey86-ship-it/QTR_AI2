@@ -111,11 +111,26 @@ def test_trade_closed_includes_trade_and_current_statistics():
 
     message = session.post.call_args.kwargs["json"]["text"]
     assert message == (
-        "\U0001f534 Trade Closed\nSymbol: BTCUSDT\nDirection: SELL\n"
+        "\U0001f534 Trade Closed\nSymbol: BTCUSDT\n"
+        "Position direction: BUY/LONG\nClosing order side: SELL\n"
         "Entry: 100.0\nExit: 95.0\nVolume: 0.01\nPnL: 5.0\nFees: 0.1\n"
         "Ticket: trade-001\nClosed at: 2025-01-01T13:30:00\n\n"
         "Total trades: 1\nWin rate: 100.00%\nNet PnL: 5.0"
     )
+
+
+def test_trade_closed_labels_short_position_and_buy_closing_side():
+    notifier, session, _ = make_notifier()
+    trade = make_trade()
+    trade.decision = Decision.BUY
+    statistics = TradeStatistics()
+    statistics.add_trade(trade)
+
+    notifier.trade_closed(trade, statistics)
+
+    message = session.post.call_args.kwargs["json"]["text"]
+    assert "Position direction: SELL/SHORT" in message
+    assert "Closing order side: BUY" in message
 
 
 @pytest.mark.parametrize(

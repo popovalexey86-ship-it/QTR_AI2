@@ -1,5 +1,6 @@
 import requests
 
+from core.decision import Decision
 from core.notification import NotificationError
 from core.position import Position
 from core.trade import Trade
@@ -83,11 +84,17 @@ class TelegramNotifier:
         trade: Trade,
         statistics: TradeStatistics,
     ) -> None:
+        position_direction = (
+            "SELL/SHORT"
+            if trade.decision == Decision.BUY
+            else "BUY/LONG"
+        )
         message = "\n".join(
             (
                 "🔴 Trade Closed",
                 f"Symbol: {trade.symbol}",
-                f"Direction: {trade.decision.value}",
+                f"Position direction: {position_direction}",
+                f"Closing order side: {trade.decision.value}",
                 f"Entry: {trade.entry}",
                 f"Exit: {trade.exit}",
                 f"Volume: {trade.volume}",
