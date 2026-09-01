@@ -16,6 +16,11 @@ class LongSetupDetector:
     - current candle revisits the Order Block without invalidating it.
     """
 
+    def __init__(self, max_sweep_age_candles: int = 20):
+        if max_sweep_age_candles < 0:
+            raise ValueError("max_sweep_age_candles must be >= 0")
+        self._max_sweep_age_candles = max_sweep_age_candles
+
     def detect(self, context: AnalysisContext) -> LongSetupCandidate | None:
         sweep = context.liquidity_sweep
         order_block = context.order_block
@@ -23,6 +28,11 @@ class LongSetupDetector:
 
         if sweep is None or sweep.direction != LiquiditySweepDirection.BULLISH:
             return None
+
+        current_index = context.market_data.last.index
+        if current_index >= sweep.index:
+            if current_index - sweep.index > self._max_sweep_age_candles:
+                return None
 
         if order_block is None or order_block.direction != OrderBlockDirection.BULLISH:
             return None
