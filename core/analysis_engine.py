@@ -8,6 +8,8 @@ from core.market_structure_state import MarketStructureState
 from core.bos_engine import BOSEngine
 from core.choch_engine import CHOCHEngine
 from core.trend_engine import TrendEngine
+from core.order_block import OrderBlock
+from core.order_block_engine import OrderBlockEngine
 from core.setup_engine import SetupEngine
 
 
@@ -22,6 +24,7 @@ class AnalysisEngine:
         choch_engine: CHOCHEngine,
         trend_engine: TrendEngine,
         setup_engine: SetupEngine,
+        order_block_engine: OrderBlockEngine | None = None,
     ):
         self._swing_engine = swing_engine
         self._structure_engine = structure_engine
@@ -30,9 +33,14 @@ class AnalysisEngine:
         self._choch_engine = choch_engine
         self._trend_engine = trend_engine
         self._setup_engine = setup_engine
+        self._order_block_engine = order_block_engine or OrderBlockEngine()
 
         # Состояние рынка хранится между вызовами analyze()
         self._state = MarketStructureState()
+
+        # Последний обнаруженный Order Block живет между циклами анализа.
+        # Это позволяет отслеживать mitigation / invalidation даже без нового BOS.
+        self._active_order_block: OrderBlock | None = None
 
     def analyze(
         self,
@@ -94,7 +102,25 @@ class AnalysisEngine:
         context.trend = self._state.trend
 
         #
-        # 7. Setup
+        # 7. SMC Order Block
+        #
+        detected_order_block = self._order_block_engine.detect(
+            market_data,
+            context.bos,
+        )
+
+        if detected_order_block is not None:
+            self._active_order_block = detected_order_block
+        elif self._active_order_block is not None:
+            self._active_order_block = self._order_block_engine.update_status(
+                self._active_order_block,
+                market_data.last,
+            )
+
+        context.order_block = self._active_order_block
+
+        #
+        # 8. Setup
         #
         context.setup = self._setup_engine.detect(
             self._state,
