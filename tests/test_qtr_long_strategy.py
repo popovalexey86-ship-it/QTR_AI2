@@ -44,7 +44,28 @@ class FakeAnalysisEngine:
         return self.context
 
 
-def test_bullish_setup_is_forwarded():
+class AcceptingLongSetupDetector:
+    def detect(self, context: AnalysisContext):
+        assert context.setup is not None
+        return object()
+
+
+def test_bullish_setup_is_forwarded_when_long_smc_gate_accepts_it():
+    market_data = make_market_data()
+    context = AnalysisContext(market_data=market_data)
+    context.trend = Trend.BULLISH
+    context.setup = make_setup(Trend.BULLISH)
+
+    result = QTRLongStrategy(
+        FakeAnalysisEngine(context),
+        setup_detector=AcceptingLongSetupDetector(),
+    ).analyze(market_data)
+
+    assert result.setup is not None
+    assert result.setup.trend == Trend.BULLISH
+
+
+def test_bullish_setup_is_removed_without_long_smc_confirmation():
     market_data = make_market_data()
     context = AnalysisContext(market_data=market_data)
     context.trend = Trend.BULLISH
@@ -52,8 +73,7 @@ def test_bullish_setup_is_forwarded():
 
     result = QTRLongStrategy(FakeAnalysisEngine(context)).analyze(market_data)
 
-    assert result.setup is not None
-    assert result.setup.trend == Trend.BULLISH
+    assert result.setup is None
 
 
 def test_bearish_market_blocks_setup():
