@@ -8,6 +8,7 @@ from core.bos import BOS
 from core.choch import CHOCH
 from core.trend import Trend
 from core.order_block import OrderBlock
+from core.liquidity_sweep import LiquiditySweep
 from core.setup import Setup
 
 
@@ -38,8 +39,11 @@ class AnalysisContext:
     # Этап 6
     trend: Trend | None = None
 
-    # Этап 7 — SMC Order Block
+    # Этап 7 — SMC Liquidity Sweep
+    liquidity_sweep: LiquiditySweep | None = None
+
+    # Этап 8 — SMC Order Block
     order_block: OrderBlock | None = None
 
-    # Этап 8
+    # Этап 9
     setup: Setup | None = None
