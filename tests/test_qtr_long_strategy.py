@@ -5,6 +5,7 @@ from core.candle import Candle
 from core.market_data import MarketData
 from core.setup import Setup
 from core.trend import Trend
+from strategies.qtr_long.score import LongScore
 from strategies.qtr_long.strategy import QTRLongStrategy
 
 
@@ -50,7 +51,56 @@ class AcceptingLongSetupDetector:
         return object()
 
 
-def test_bullish_setup_is_forwarded_when_long_smc_gate_accepts_it():
+class FixedScoringEngine:
+    def __init__(self, total: int):
+        self.total = total
+
+    def score(self, context: AnalysisContext, candidate) -> LongScore:
+        assert context.setup is not None
+        assert candidate is not None
+        if self.total >= 80:
+            return LongScore(20, 20, 20, 10, 5, 5)  # 80
+        return LongScore(15, 15, 15, 10, 5, 5)  # 65
+
+
+def test_bullish_setup_is_forwarded_when_smc_and_score_gates_accept_it():
+    market_data = make_market_data()
+    context = AnalysisContext(market_data=market_data)
+    context.trend = Trend.BULLISH
+    context.setup = make_setup(Trend.BULLISH)
+
+    strategy = QTRLongStrategy(
+        FakeAnalysisEngine(context),
+        setup_detector=AcceptingLongSetupDetector(),
+        scoring_engine=FixedScoringEngine(80),
+    )
+    result = strategy.analyze(market_data)
+
+    assert result.setup is not None
+    assert result.setup.trend == Trend.BULLISH
+    assert strategy.last_score is not None
+    assert strategy.last_score.total == 80
+
+
+def test_bullish_setup_is_removed_when_score_is_below_threshold():
+    market_data = make_market_data()
+    context = AnalysisContext(market_data=market_data)
+    context.trend = Trend.BULLISH
+    context.setup = make_setup(Trend.BULLISH)
+
+    strategy = QTRLongStrategy(
+        FakeAnalysisEngine(context),
+        setup_detector=AcceptingLongSetupDetector(),
+        scoring_engine=FixedScoringEngine(65),
+    )
+    result = strategy.analyze(market_data)
+
+    assert result.setup is None
+    assert strategy.last_score is not None
+    assert strategy.last_score.total == 65
+
+
+def test_minimum_score_is_configurable():
     market_data = make_market_data()
     context = AnalysisContext(market_data=market_data)
     context.trend = Trend.BULLISH
@@ -59,10 +109,11 @@ def test_bullish_setup_is_forwarded_when_long_smc_gate_accepts_it():
     result = QTRLongStrategy(
         FakeAnalysisEngine(context),
         setup_detector=AcceptingLongSetupDetector(),
+        scoring_engine=FixedScoringEngine(65),
+        minimum_score=60,
     ).analyze(market_data)
 
     assert result.setup is not None
-    assert result.setup.trend == Trend.BULLISH
 
 
 def test_bullish_setup_is_removed_without_long_smc_confirmation():
