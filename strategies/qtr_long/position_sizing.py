@@ -1,5 +1,5 @@
-from dataclasses import dataclass
 import math
+from dataclasses import dataclass
 
 from strategies.qtr_long.risk import LongRiskPlan
 
