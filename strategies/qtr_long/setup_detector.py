@@ -13,7 +13,8 @@ class LongSetupDetector:
     - bullish liquidity sweep and reclaim;
     - bullish BOS or CHOCH confirmation;
     - active bullish Order Block;
-    - current candle revisits the Order Block without invalidating it.
+    - current candle revisits the Order Block without invalidating it;
+    - entry close remains inside the bullish Order Block.
     """
 
     def __init__(self, max_sweep_age_candles: int = 20):
@@ -60,9 +61,14 @@ class LongSetupDetector:
         if not touches_order_block:
             return None
 
-        # Entry uses the current reclaim/reaction close. Invalidation belongs
-        # below both the bullish OB and the sweep extreme.
+        # Genesis hypothesis #1: do not chase a reaction after price has already
+        # closed away from value. The actual entry close must still be inside
+        # the bullish Order Block that produced the candidate.
         entry = candle.close
+        if not order_block.contains(entry):
+            return None
+
+        # Invalidation belongs below both the bullish OB and the sweep extreme.
         stop_loss = min(order_block.low, sweep.extreme_price)
         if stop_loss >= entry:
             return None
