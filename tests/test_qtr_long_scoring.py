@@ -6,6 +6,7 @@ from core.bos_type import BOSType
 from core.candle import Candle
 from core.choch import CHOCH
 from core.choch_type import CHOCHType
+from core.fair_value_gap import FairValueGap, FairValueGapDirection
 from core.liquidity_sweep import LiquiditySweep, LiquiditySweepDirection
 from core.market_data import MarketData
 from core.market_structure_state import MarketStructureState
@@ -24,7 +25,7 @@ def build_context() -> tuple[AnalysisContext, LongSetupCandidate]:
                 index=index,
                 timestamp=start + timedelta(minutes=15 * index),
                 open=100,
-                high=110 if index == 0 else 103,
+                high=110 if index in (0, 1) else 103,
                 low=90 if index == 1 else 97,
                 close=100,
                 volume=100,
@@ -61,6 +62,13 @@ def build_context() -> tuple[AnalysisContext, LongSetupCandidate]:
     context = AnalysisContext(market_data=market_data)
     context.trend = Trend.BULLISH
     context.market_structure_state = state
+    context.fair_value_gap = FairValueGap(
+        index=19,
+        timestamp=candles[19].timestamp,
+        direction=FairValueGapDirection.BULLISH,
+        low=95,
+        high=99,
+    )
 
     sweep = LiquiditySweep(
         index=18,
@@ -95,8 +103,9 @@ def test_strong_confluence_can_score_100():
 
     assert score.structure == 25
     assert score.liquidity == 20
-    assert score.order_block == 20
-    assert score.momentum == 15
+    assert score.order_block == 15
+    assert score.fvg == 10
+    assert score.momentum == 10
     assert score.volume == 10
     assert score.location == 10
     assert score.total == 100
@@ -122,7 +131,7 @@ def test_mitigated_order_block_scores_less_than_fresh():
 
     score = LongScoringEngine().score(context, candidate)
 
-    assert score.order_block == 17
+    assert score.order_block == 13
 
 
 def test_old_sweep_loses_recency_bonus():
