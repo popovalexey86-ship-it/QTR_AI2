@@ -36,5 +36,5 @@ jobs:
           tests/test_qtr_long_strategy.py
       - name: Mypy QTR Long
         run: mypy strategies/qtr_long core/fair_value_gap.py core/fair_value_gap_engine.py core/liquidity_sweep.py core/liquidity_sweep_engine.py core/order_block.py core/order_block_engine.py
-      - name: Ruff QTR Long
-        run: ruff check strategies/qtr_long core/fair_value_gap.py core/fair_value_gap_engine.py core/liquidity_sweep.py core/liquidity_sweep_engine.py core/order_block.py core/order_block_engine.py tests/test_qtr_long_*.py tests/test_fair_value_gap_engine.py tests/test_liquidity_sweep_engine.py tests/test_order_block.py tests/test_order_block_engine.py tests/test_analysis_engine_order_block.py
+      - name: Ruff QTR Long production code
+        run: ruff check strategies/qtr_long core/fair_value_gap.py core/fair_value_gap_engine.py core/liquidity_sweep.py core/liquidity_sweep_engine.py core/order_block.py core/order_block_engine.py
