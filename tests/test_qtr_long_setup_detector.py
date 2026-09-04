@@ -23,7 +23,7 @@ def make_context() -> AnalysisContext:
                 open=99,
                 high=102,
                 low=97.5,
-                close=101,
+                close=99,
                 volume=2,
             )
         ],
@@ -64,7 +64,7 @@ def test_detects_sweep_reclaim_order_block_long_candidate():
 
     assert candidate is not None
     assert candidate.type == LongSetupType.SWEEP_RECLAIM_ORDER_BLOCK
-    assert candidate.entry == 101
+    assert candidate.entry == 99
     assert candidate.stop_loss == 96.5
 
 
@@ -97,6 +97,21 @@ def test_rejects_when_price_has_not_returned_to_order_block():
         high=105,
         low=102,
         close=104,
+        volume=2,
+    )
+
+    assert LongSetupDetector().detect(context) is None
+
+
+def test_rejects_when_reaction_closes_above_order_block():
+    context = make_context()
+    context.market_data.candles[0] = Candle(
+        index=12,
+        timestamp=datetime(2025, 1, 1),
+        open=99,
+        high=102,
+        low=97.5,
+        close=101,
         volume=2,
     )
 
