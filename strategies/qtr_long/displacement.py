@@ -3,7 +3,7 @@ from statistics import median
 
 from core.candle import Candle
 from core.market_data import MarketData
-from strategies.qtr_long.execution_raid import LongExecutionRaid
+from strategies.qtr_long.execution_raid import LongLiquidityRaid
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +60,7 @@ class LongDisplacementEngine:
     def detect(
         self,
         market_data: MarketData,
-        raid: LongExecutionRaid,
+        raid: LongLiquidityRaid,
     ) -> LongDisplacement | None:
         candidates = [
             candle
@@ -79,7 +79,7 @@ class LongDisplacementEngine:
     def _evaluate_candle(
         self,
         market_data: MarketData,
-        raid: LongExecutionRaid,
+        raid: LongLiquidityRaid,
         candle: Candle,
     ) -> LongDisplacement | None:
         candle_range = candle.high - candle.low
@@ -93,7 +93,8 @@ class LongDisplacementEngine:
         previous_ranges = [
             item.high - item.low
             for item in market_data.candles
-            if item.index < candle.index and item.index >= candle.index - self._lookback
+            if item.index < candle.index
+            and item.index >= candle.index - self._lookback
             and item.high > item.low
         ]
         if not previous_ranges:
