@@ -7,6 +7,9 @@ from core.market_structure_state import MarketStructureState
 from core.bos import BOS
 from core.choch import CHOCH
 from core.trend import Trend
+from core.order_block import OrderBlock
+from core.liquidity_sweep import LiquiditySweep
+from core.fair_value_gap import FairValueGap
 from core.setup import Setup
 
 
@@ -37,5 +40,14 @@ class AnalysisContext:
     # Этап 6
     trend: Trend | None = None
 
-    # Этап 7
+    # Этап 7 — SMC Liquidity Sweep
+    liquidity_sweep: LiquiditySweep | None = None
+
+    # Этап 8 — SMC Order Block
+    order_block: OrderBlock | None = None
+
+    # Этап 9 — SMC Fair Value Gap / Imbalance
+    fair_value_gap: FairValueGap | None = None
+
+    # Этап 10
     setup: Setup | None = None

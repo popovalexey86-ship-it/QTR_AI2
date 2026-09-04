@@ -35,6 +35,7 @@ class BacktestRunner:
             raise BacktestInputError("Backtest symbol cannot be empty.")
 
         self._symbol = symbol
+        self._strategy = strategy
         self._broker = SimulatedBroker(
             symbol=symbol,
             pending_entry_ttl_candles=pending_entry_ttl_candles,
@@ -56,6 +57,10 @@ class BacktestRunner:
             position_monitor=self._position_monitor,
         )
         self._has_run = False
+
+    @property
+    def strategy(self) -> Strategy:
+        return self._strategy
 
     def run(self, snapshots: Iterable[MarketData]) -> BacktestResult:
         if self._has_run:
