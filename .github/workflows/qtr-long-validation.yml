@@ -38,3 +38,9 @@ jobs:
         run: mypy strategies/qtr_long core/fair_value_gap.py core/fair_value_gap_engine.py core/liquidity_sweep.py core/liquidity_sweep_engine.py core/order_block.py core/order_block_engine.py
       - name: Ruff QTR Long production code
         run: ruff check strategies/qtr_long core/fair_value_gap.py core/fair_value_gap_engine.py core/liquidity_sweep.py core/liquidity_sweep_engine.py core/order_block.py core/order_block_engine.py
+      - name: Full repository tests
+        run: pytest -q
+      - name: Full repository mypy
+        run: mypy .
+      - name: Full repository ruff
+        run: ruff check .
