@@ -5,6 +5,7 @@ entry, but it must never be converted into a short entry.
 """
 
 from strategies.qtr_long.decision_engine import LongDecisionEngine
+from strategies.qtr_long.position_sizing import LongPositionSize, LongPositionSizer
 from strategies.qtr_long.regime import LongMarketRegime, LongRegimeEngine
 from strategies.qtr_long.risk import LongRiskGate, LongRiskPlan
 from strategies.qtr_long.score import LongScore, LongScoreGrade
@@ -16,6 +17,8 @@ from strategies.qtr_long.strategy import QTRLongStrategy
 __all__ = [
     "LongDecisionEngine",
     "LongMarketRegime",
+    "LongPositionSize",
+    "LongPositionSizer",
     "LongRegimeEngine",
     "LongRiskGate",
     "LongRiskPlan",
