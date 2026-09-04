@@ -17,6 +17,7 @@ class LongScore:
     structure: int
     liquidity: int
     order_block: int
+    fvg: int
     momentum: int
     volume: int
     location: int
@@ -25,8 +26,9 @@ class LongScore:
         limits = {
             "structure": 25,
             "liquidity": 20,
-            "order_block": 20,
-            "momentum": 15,
+            "order_block": 15,
+            "fvg": 10,
+            "momentum": 10,
             "volume": 10,
             "location": 10,
         }
@@ -41,6 +43,7 @@ class LongScore:
             self.structure
             + self.liquidity
             + self.order_block
+            + self.fvg
             + self.momentum
             + self.volume
             + self.location
