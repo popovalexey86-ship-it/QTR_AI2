@@ -1,6 +1,11 @@
+from collections.abc import Iterable
+
+from backtesting.backtest_result import BacktestResult
 from backtesting.backtest_runner import BacktestRunner
+from backtesting.snapshots import iter_market_data_snapshots
 from core.analysis_engine import AnalysisEngine
 from core.bos_engine import BOSEngine
+from core.candle import Candle
 from core.choch_engine import CHOCHEngine
 from core.setup_engine import SetupEngine
 from core.swing_engine import SwingEngine
@@ -54,3 +59,32 @@ def create_qtr_long_backtest_runner(
         risk_manager=risk_manager,
         pending_entry_ttl_candles=pending_entry_ttl_candles,
     )
+
+
+def run_qtr_long_backtest(
+    candles: Iterable[Candle],
+    *,
+    symbol: str,
+    interval: str = "15",
+    history_window: int = 500,
+    volume: float = 1.0,
+    minimum_score: int = 80,
+    risk_reward: float = 2.0,
+    pending_entry_ttl_candles: int = 4,
+) -> BacktestResult:
+    """Run QTR Long over chronological historical candles without lookahead."""
+
+    runner = create_qtr_long_backtest_runner(
+        symbol=symbol,
+        volume=volume,
+        minimum_score=minimum_score,
+        risk_reward=risk_reward,
+        pending_entry_ttl_candles=pending_entry_ttl_candles,
+    )
+    snapshots = iter_market_data_snapshots(
+        candles,
+        symbol=symbol,
+        interval=interval,
+        history_window=history_window,
+    )
+    return runner.run(snapshots)
