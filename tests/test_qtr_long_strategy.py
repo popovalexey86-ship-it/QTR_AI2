@@ -59,8 +59,8 @@ class FixedScoringEngine:
         assert context.setup is not None
         assert candidate is not None
         if self.total >= 80:
-            return LongScore(20, 20, 20, 10, 5, 5)  # 80
-        return LongScore(15, 15, 15, 10, 5, 5)  # 65
+            return LongScore(20, 20, 15, 10, 5, 5, 5)  # 80
+        return LongScore(15, 15, 10, 5, 5, 10, 5)  # 65
 
 
 def test_bullish_setup_is_forwarded_when_smc_and_score_gates_accept_it():
