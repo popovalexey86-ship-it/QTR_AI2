@@ -3,6 +3,7 @@ from core.analysis_engine import AnalysisEngine
 from core.market_data import MarketData
 from core.setup import Setup
 from core.trend import Trend
+from strategies.qtr_long.diagnostics import LongSignalDiagnostic
 from strategies.qtr_long.regime import LongMarketRegime, LongRegimeEngine
 from strategies.qtr_long.risk import LongRiskGate, LongRiskPlan
 from strategies.qtr_long.score import LongScore
@@ -35,6 +36,7 @@ class QTRLongStrategy(Strategy):
         self._last_candidate: LongSetupCandidate | None = None
         self._last_score: LongScore | None = None
         self._last_risk_plan: LongRiskPlan | None = None
+        self._accepted_signals: list[LongSignalDiagnostic] = []
 
     @property
     def last_candidate(self) -> LongSetupCandidate | None:
@@ -47,6 +49,10 @@ class QTRLongStrategy(Strategy):
     @property
     def last_risk_plan(self) -> LongRiskPlan | None:
         return self._last_risk_plan
+
+    @property
+    def accepted_signals(self) -> tuple[LongSignalDiagnostic, ...]:
+        return tuple(self._accepted_signals)
 
     def analyze(self, market_data: MarketData) -> AnalysisContext:
         context = self._analysis_engine.analyze(market_data)
@@ -74,6 +80,14 @@ class QTRLongStrategy(Strategy):
         if self._last_risk_plan is None:
             context.setup = None
             return context
+
+        self._accepted_signals.append(
+            LongSignalDiagnostic.from_candidate(
+                signal_timestamp=context.market_data.last.timestamp,
+                candidate=candidate,
+                score=self._last_score,
+            )
+        )
 
         # QTR Long owns its final BUY setup. This deliberately avoids relying
         # on the generic SetupEngine, which can suppress RANGE contexts even
