@@ -30,9 +30,11 @@ class LongSetupDetector:
             return None
 
         current_index = context.market_data.last.index
-        if current_index >= sweep.index:
-            if current_index - sweep.index > self._max_sweep_age_candles:
-                return None
+        if (
+            current_index >= sweep.index
+            and current_index - sweep.index > self._max_sweep_age_candles
+        ):
+            return None
 
         if order_block is None or order_block.direction != OrderBlockDirection.BULLISH:
             return None
