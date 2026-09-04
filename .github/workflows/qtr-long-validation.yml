@@ -14,8 +14,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install validation tools
-        run: python -m pip install --upgrade pip pytest mypy ruff
+      - name: Install validation tools and runtime deps
+        run: python -m pip install --upgrade pip pytest mypy ruff requests python-dotenv
       - name: Focused QTR Long tests
         run: >-
           pytest -q
