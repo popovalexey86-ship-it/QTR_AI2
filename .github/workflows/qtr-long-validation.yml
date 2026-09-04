@@ -1,0 +1,40 @@
+name: QTR Long Validation
+
+on:
+  push:
+    branches:
+      - feature/qtr-long-genesis
+  workflow_dispatch:
+
+jobs:
+  qtr-long:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install validation tools
+        run: python -m pip install --upgrade pip pytest mypy ruff
+      - name: Focused QTR Long tests
+        run: >-
+          pytest -q
+          tests/test_fair_value_gap_engine.py
+          tests/test_liquidity_sweep_engine.py
+          tests/test_order_block.py
+          tests/test_order_block_engine.py
+          tests/test_analysis_engine_order_block.py
+          tests/test_qtr_long_price_location.py
+          tests/test_qtr_long_regime.py
+          tests/test_qtr_long_decision_engine.py
+          tests/test_qtr_long_setup_detector.py
+          tests/test_qtr_long_score.py
+          tests/test_qtr_long_scoring.py
+          tests/test_qtr_long_risk.py
+          tests/test_qtr_long_position_sizing.py
+          tests/test_qtr_long_buy_only_boundary.py
+          tests/test_qtr_long_strategy.py
+      - name: Mypy QTR Long
+        run: mypy strategies/qtr_long core/fair_value_gap.py core/fair_value_gap_engine.py core/liquidity_sweep.py core/liquidity_sweep_engine.py core/order_block.py core/order_block_engine.py
+      - name: Ruff QTR Long
+        run: ruff check strategies/qtr_long core/fair_value_gap.py core/fair_value_gap_engine.py core/liquidity_sweep.py core/liquidity_sweep_engine.py core/order_block.py core/order_block_engine.py tests/test_qtr_long_*.py tests/test_fair_value_gap_engine.py tests/test_liquidity_sweep_engine.py tests/test_order_block.py tests/test_order_block_engine.py tests/test_analysis_engine_order_block.py
