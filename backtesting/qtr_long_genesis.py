@@ -1,5 +1,5 @@
 import argparse
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 from pathlib import Path
 
 from backtesting.historical_data import (
@@ -13,10 +13,10 @@ from infrastructure.bybit.bybit_historical_client import BybitHistoricalClient
 
 def _utc_date(value: str) -> datetime:
     try:
-        parsed = datetime.strptime(value, "%Y-%m-%d")
+        parsed = date.fromisoformat(value)
     except ValueError as error:
         raise argparse.ArgumentTypeError("date must use YYYY-MM-DD") from error
-    return parsed.replace(tzinfo=UTC)
+    return datetime.combine(parsed, time.min, tzinfo=UTC)
 
 
 def build_parser() -> argparse.ArgumentParser:
