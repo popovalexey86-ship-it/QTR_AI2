@@ -5,11 +5,11 @@ from strategies.qtr_long.score import LongScore, LongScoreGrade
 
 def make_score(total_band: str) -> LongScore:
     values = {
-        "ignore": (10, 10, 10, 5, 5, 5),      # 45
-        "watch": (15, 15, 15, 5, 5, 5),       # 60
-        "possible": (20, 15, 15, 10, 5, 5),   # 70
-        "long": (20, 20, 20, 10, 5, 5),       # 80
-        "a_plus": (25, 20, 20, 15, 10, 10),   # 100
+        "ignore": (10, 10, 10, 5, 5, 5, 0),      # 45
+        "watch": (15, 15, 10, 5, 5, 5, 5),       # 60
+        "possible": (20, 15, 10, 10, 5, 5, 5),   # 70
+        "long": (20, 20, 15, 10, 5, 5, 5),       # 80
+        "a_plus": (25, 20, 15, 10, 10, 10, 10),  # 100
     }
     return LongScore(*values[total_band])
 
@@ -36,10 +36,11 @@ def test_grade_thresholds(band, grade):
 def test_component_cannot_exceed_its_weight():
     with pytest.raises(ValueError):
         LongScore(
-            structure=26,
+            structure=25,
             liquidity=20,
-            order_block=20,
-            momentum=15,
+            order_block=16,
+            fvg=10,
+            momentum=10,
             volume=10,
             location=9,
         )
