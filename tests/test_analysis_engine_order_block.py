@@ -1,11 +1,19 @@
 from datetime import datetime
+from typing import cast
 
 from core.analysis_engine import AnalysisEngine
 from core.bos import BOS
+from core.bos_engine import BOSEngine
 from core.bos_type import BOSType
 from core.candle import Candle
+from core.choch_engine import CHOCHEngine
 from core.market_data import MarketData
 from core.order_block import OrderBlockStatus
+from core.setup_engine import SetupEngine
+from core.swing_engine import SwingEngine
+from core.trend_engine import TrendEngine
+from market_structure.market_structure_engine import MarketStructureEngine
+from market_structure.structure_engine import StructureEngine
 
 
 class StubSwingEngine:
@@ -75,13 +83,16 @@ def make_candle(
 
 def make_engine() -> AnalysisEngine:
     return AnalysisEngine(
-        swing_engine=StubSwingEngine(),
-        structure_engine=StubStructureEngine(),
-        market_structure_engine=StubMarketStructureEngine(),
-        bos_engine=SequencedBOSEngine(),
-        choch_engine=StubCHOCHEngine(),
-        trend_engine=StubTrendEngine(),
-        setup_engine=StubSetupEngine(),
+        swing_engine=cast(SwingEngine, StubSwingEngine()),
+        structure_engine=cast(StructureEngine, StubStructureEngine()),
+        market_structure_engine=cast(
+            MarketStructureEngine,
+            StubMarketStructureEngine(),
+        ),
+        bos_engine=cast(BOSEngine, SequencedBOSEngine()),
+        choch_engine=cast(CHOCHEngine, StubCHOCHEngine()),
+        trend_engine=cast(TrendEngine, StubTrendEngine()),
+        setup_engine=cast(SetupEngine, StubSetupEngine()),
     )
 
 
