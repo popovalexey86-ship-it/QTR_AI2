@@ -48,6 +48,11 @@ class QTRLongHierarchyBacktestResult:
     stage_counts: Mapping[LongHierarchyStage, int]
     decisions: tuple[LongHierarchyResult, ...]
     buy_plans: tuple[LongExecutionEntryPlan, ...]
+    decision_times: tuple[datetime, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.decision_times and len(self.decision_times) != len(self.decisions):
+            raise ValueError("decision_times must align one-to-one with decisions")
 
 
 class QTRLongHierarchyBacktestRunner:
@@ -95,6 +100,7 @@ class QTRLongHierarchyBacktestRunner:
         self._has_run = True
 
         decisions: list[LongHierarchyResult] = []
+        decision_times: list[datetime] = []
         buy_plans: list[LongExecutionEntryPlan] = []
         stage_counts: Counter[LongHierarchyStage] = Counter()
         previous_as_of: datetime | None = None
@@ -124,6 +130,7 @@ class QTRLongHierarchyBacktestRunner:
                 execution_5m=analysis.execution_5m,
             )
             decisions.append(result)
+            decision_times.append(context.as_of)
             stage_counts[result.stage] += 1
 
             if result.decision == LongHierarchyDecision.BUY_PLAN:
@@ -147,6 +154,7 @@ class QTRLongHierarchyBacktestRunner:
             stage_counts=dict(stage_counts),
             decisions=tuple(decisions),
             buy_plans=tuple(buy_plans),
+            decision_times=tuple(decision_times),
         )
 
     def _validate_context(
