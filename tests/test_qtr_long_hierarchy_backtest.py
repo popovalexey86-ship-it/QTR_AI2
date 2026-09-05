@@ -14,6 +14,7 @@ from strategies.qtr_long.hierarchy import LongHierarchyStage
 
 
 BASE = datetime(2026, 1, 1, tzinfo=UTC)
+END = BASE + timedelta(hours=8)
 
 
 def _series(*, minutes: int, count: int, start: datetime = BASE) -> tuple[Candle, ...]:
@@ -41,6 +42,10 @@ def _result(candles: tuple[Candle, ...], name: str) -> HistoricalDataResult:
 
 def _bundle() -> QTRLongHistoricalBundle:
     return QTRLongHistoricalBundle(
+        category="linear",
+        symbol="BTCUSDT",
+        start=BASE,
+        end=END,
         execution_5m=_result(_series(minutes=5, count=49), "5.json"),
         setup_15m=_result(_series(minutes=15, count=17), "15.json"),
         structure_1h=_result(_series(minutes=60, count=5), "60.json"),
