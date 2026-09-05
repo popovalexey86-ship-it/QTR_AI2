@@ -73,14 +73,18 @@ class QTRLongHierarchy:
     analysis contexts:
 
         4H narrative
-        -> 1H structure confirmation
-        -> 15m structural POI
+        -> 1H structure confirmation + structural dealing range
+        -> 15m POI inside the 1H dealing range
         -> 15m sell-side liquidity map
         -> 5m liquidity raid
         -> 5m displacement
         -> 5m bullish MSS/BOS
         -> 5m execution FVG/OB
         -> pending BUY plan
+
+    The 1H layer owns the structural dealing range. The 15m layer supplies the
+    candidate bullish POI and liquidity map; it does not redefine the higher-
+    timeframe range used for location permission.
 
     Execution evidence is stateful across successive 5m snapshots. A liquidity
     raid is recorded only when it happens on the current terminal 5m candle;
@@ -160,7 +164,7 @@ class QTRLongHierarchy:
             self._reset_execution()
             return self._skip(LongHierarchyStage.STRUCTURE_1H, structure.reason)
 
-        dealing_range = self._dealing_range_engine.build(setup_15m.swings)
+        dealing_range = self._dealing_range_engine.build(structure_1h.swings)
         poi = self._poi_engine.evaluate(
             dealing_range=dealing_range,
             order_block=setup_15m.order_block,
