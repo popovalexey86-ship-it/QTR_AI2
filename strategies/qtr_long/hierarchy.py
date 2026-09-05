@@ -52,12 +52,15 @@ class LongHierarchyResult:
 
     A result is either a pending BUY plan or an explicit SKIP with the gate that
     stopped the sequence. SELL/SHORT is intentionally absent from the domain.
+    ``details`` is optional forensic text for diagnostics only; it never affects
+    strategy decisions.
     """
 
     decision: LongHierarchyDecision
     stage: LongHierarchyStage
     reason: str
     entry_plan: LongExecutionEntryPlan | None = None
+    details: str | None = None
 
     def __post_init__(self) -> None:
         if self.decision == LongHierarchyDecision.BUY_PLAN and self.entry_plan is None:
@@ -207,6 +210,7 @@ class QTRLongHierarchy:
                 return self._skip(
                     LongHierarchyStage.DISPLACEMENT_5M,
                     "waiting for bullish 5m displacement after raid",
+                    details=self._execution_details(execution_5m),
                 )
 
         if self._structure_shift is None:
@@ -218,6 +222,7 @@ class QTRLongHierarchy:
                 return self._skip(
                     LongHierarchyStage.STRUCTURE_5M,
                     "waiting for bullish 5m MSS/BOS after displacement",
+                    details=self._execution_details(execution_5m),
                 )
 
         plan = self._entry_engine.build(
@@ -228,10 +233,12 @@ class QTRLongHierarchy:
             order_block=execution_5m.order_block,
         )
         if plan is None:
+            details = self._execution_details(execution_5m)
             self._reset_execution()
             return self._skip(
                 LongHierarchyStage.ENTRY_5M,
                 "confirmed execution sequence has no valid 5m entry zone",
+                details=details,
             )
 
         result = LongHierarchyResult(
@@ -239,6 +246,7 @@ class QTRLongHierarchy:
             stage=LongHierarchyStage.READY,
             reason="hierarchical QTR Long sequence confirmed",
             entry_plan=plan,
+            details=self._execution_details(execution_5m),
         )
         self._reset_execution()
         return result
@@ -256,17 +264,81 @@ class QTRLongHierarchy:
             ):
                 self._reset_execution()
 
+    def _execution_details(self, execution_5m: AnalysisContext) -> str:
+        parts = [
+            f"current_index={execution_5m.market_data.last.index}",
+            f"current_time={execution_5m.market_data.last.timestamp.isoformat()}",
+        ]
+
+        if self._raid is not None:
+            parts.extend(
+                (
+                    f"raid_index={self._raid.candle.index}",
+                    f"raid_time={self._raid.candle.timestamp.isoformat()}",
+                    f"raid_level={self._raid.level.price:.8f}",
+                    f"raid_extreme={self._raid.extreme_price:.8f}",
+                    f"raid_reclaim={self._raid.reclaim_close:.8f}",
+                )
+            )
+
+        if self._displacement is not None:
+            parts.extend(
+                (
+                    f"displacement_index={self._displacement.candle.index}",
+                    f"displacement_time={self._displacement.candle.timestamp.isoformat()}",
+                    f"body_ratio={self._displacement.body_ratio:.4f}",
+                    f"range_expansion={self._displacement.range_expansion:.4f}",
+                    f"close_location={self._displacement.close_location:.4f}",
+                )
+            )
+
+        state = execution_5m.market_structure_state
+        if state is None:
+            parts.append("structure_state=none")
+            return " ".join(parts)
+
+        parts.append(f"trend={state.trend.value}")
+        if state.last_choch is None:
+            parts.append("last_choch=none")
+        else:
+            parts.extend(
+                (
+                    f"last_choch={state.last_choch.type.value}",
+                    f"last_choch_index={state.last_choch.index}",
+                    f"last_choch_time={state.last_choch.timestamp.isoformat()}",
+                    f"last_choch_price={state.last_choch.price:.8f}",
+                )
+            )
+        if state.last_bos is None:
+            parts.append("last_bos=none")
+        else:
+            parts.extend(
+                (
+                    f"last_bos={state.last_bos.type.value}",
+                    f"last_bos_index={state.last_bos.index}",
+                    f"last_bos_time={state.last_bos.timestamp.isoformat()}",
+                    f"last_bos_price={state.last_bos.price:.8f}",
+                )
+            )
+        return " ".join(parts)
+
     def _reset_execution(self) -> None:
         self._raid = None
         self._displacement = None
         self._structure_shift = None
 
     @staticmethod
-    def _skip(stage: LongHierarchyStage, reason: str) -> LongHierarchyResult:
+    def _skip(
+        stage: LongHierarchyStage,
+        reason: str,
+        *,
+        details: str | None = None,
+    ) -> LongHierarchyResult:
         return LongHierarchyResult(
             decision=LongHierarchyDecision.SKIP,
             stage=stage,
             reason=reason,
+            details=details,
         )
 
     @classmethod
