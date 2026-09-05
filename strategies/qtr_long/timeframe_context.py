@@ -51,7 +51,6 @@ class QTRLongTimeframeContextBuilder:
         self._validate_layers(layers)
 
         as_of = _last_close_time(execution_5m)
-        symbol = execution_5m.symbol
 
         return QTRLongTimeframeContext(
             execution_5m=_closed_copy(execution_5m, as_of=as_of),
