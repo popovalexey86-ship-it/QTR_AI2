@@ -40,8 +40,9 @@ def test_yields_only_after_all_higher_timeframes_have_closed_data() -> None:
         )
     )
 
-    assert len(contexts) == 1
-    assert contexts[0].as_of == BASE + timedelta(hours=4, minutes=5)
+    assert len(contexts) == 2
+    assert contexts[0].as_of == BASE + timedelta(hours=4)
+    assert contexts[1].as_of == BASE + timedelta(hours=4, minutes=5)
 
 
 def test_excludes_in_progress_higher_timeframe_candles() -> None:
