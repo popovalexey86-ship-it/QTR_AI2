@@ -22,11 +22,13 @@ Bearish information can only block a LONG thesis. It must never create SELL/SHOR
 QTR Long vNext uses four explicit, synchronized layers:
 
 - 4H — higher-timeframe narrative
-- 1H — structural confirmation / dealing-range context
-- 15m — setup context, POI and liquidity map
+- 1H — structural confirmation and structural dealing range
+- 15m — setup POI and liquidity map inside the 1H range context
 - 5m — execution trigger
 
 Every decision is evaluated only from candles that are already closed at the terminal 5m decision time. Missing higher-timeframe data blocks the hierarchy rather than silently falling back to a lower timeframe.
+
+The 1H layer is the authoritative owner of the dealing range used for location permission. The 15m layer may identify a bullish OB/FVG candidate, but its own swings do not redefine the higher-timeframe dealing range.
 
 ## Decision hierarchy
 
@@ -35,7 +37,7 @@ Every decision is evaluated only from candles that are already closed at the ter
     ↓
 1H Structure Confirmation
     ↓
-15m Dealing Range / Location
+1H Structural Dealing Range / Location Context
     ↓
 15m POI: bullish OB + optional active bullish FVG
     ↓
@@ -66,13 +68,14 @@ Mandatory gates in vNext:
 
 1. Narrative gate — no LONG without an explicit bullish 4H thesis.
 2. 1H structure gate — bearish or unsupported structure produces SKIP.
-3. 15m location / POI gate — the setup must exist in an allowed structural location.
-4. 15m liquidity gate — a meaningful sell-side liquidity reference must exist for a future LONG raid.
-5. 5m raid gate — price must trade below mapped sell-side liquidity and reclaim above it on a closed candle.
-6. 5m displacement gate — the raid must be followed by meaningful bullish expansion.
-7. 5m structure gate — bullish MSS/CHOCH or bullish BOS must confirm the execution shift.
-8. Execution-value gate — a valid bullish FVG / Order Block must be known by structure confirmation time.
-9. Risk gate — invalid stop geometry, insufficient R:R, or account limits always produce SKIP.
+3. 1H location context — a structural dealing range must exist and is the authoritative frame for POI location.
+4. 15m POI gate — the bullish setup must exist in an allowed location within that 1H dealing range.
+5. 15m liquidity gate — a meaningful sell-side liquidity reference must exist for a future LONG raid.
+6. 5m raid gate — price must trade below mapped sell-side liquidity and reclaim above it on a closed candle.
+7. 5m displacement gate — the raid must be followed by meaningful bullish expansion.
+8. 5m structure gate — bullish MSS/CHOCH or bullish BOS must confirm the execution shift.
+9. Execution-value gate — a valid bullish FVG / Order Block must be known by structure confirmation time.
+10. Risk gate — invalid stop geometry, insufficient R:R, or account limits always produce SKIP.
 
 Scores may still rank already-valid candidates, but scores do not override failed gates.
 
@@ -96,7 +99,9 @@ A future retracement is never inspected before entry planning. Once raid → dis
         ↓
 1H bullish/supportive structure
         ↓
-15m discount/equilibrium POI
+1H structural discount/equilibrium context
+        ↓
+15m bullish POI inside that context
         ↓
 15m mapped sell-side liquidity
         ↓
@@ -122,6 +127,7 @@ Implemented on `feature/qtr-long-smc-hierarchy`:
 - structural dealing range
 - structural 4H narrative engine
 - 1H structure confirmation gate
+- explicit 1H ownership of the dealing range used by the 15m POI gate
 - 15m POI gate
 - 15m sell-side liquidity map
 - 5m liquidity raid detector
@@ -129,6 +135,8 @@ Implemented on `feature/qtr-long-smc-hierarchy`:
 - 5m MSS / bullish BOS confirmation
 - 5m execution FVG / OB entry planning
 - stateful hierarchical orchestrator returning BUY PLAN or SKIP with reason
+- dedicated MTF historical loader, synchronized snapshot stream, analysis coordinator and decision-level backtest runner
+- explicit warmup support so higher-timeframe state is built before the evaluation window without contaminating evaluation statistics
 
 The previous Genesis setup remains frozen and is not modified by vNext work.
 
@@ -164,11 +172,12 @@ Do not rescue a weak setup by repeatedly changing thresholds on the same sample.
 
 ## Next milestone
 
-Before any new strategy feature or backtest optimization:
+Before any backtest optimization or new strategy feature:
 
-1. run focused pytest for the complete hierarchy;
+1. run focused pytest for the updated hierarchy and MTF backtest stack;
 2. run focused mypy;
 3. run focused ruff;
 4. fix mechanical typing/lint issues only;
-5. wire the four synchronized timeframes into a dedicated QTR Long vNext backtest;
-6. freeze the first hierarchical setup specification before evaluating performance.
+5. freeze the first hierarchical setup specification;
+6. run the first real BTCUSDT MTF diagnostic period with declared warmup and evaluation windows;
+7. inspect stage diagnostics before any performance tuning.
