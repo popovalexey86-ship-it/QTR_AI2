@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from backtesting.backtest_runner import BacktestInputError
 from backtesting.historical_data import HistoricalDataResult
 from backtesting.qtr_long_hierarchy_backtest import (
     QTRLongHierarchyBacktestConfig,
@@ -40,10 +41,10 @@ def _result(candles: tuple[Candle, ...], name: str) -> HistoricalDataResult:
     )
 
 
-def _bundle() -> QTRLongHistoricalBundle:
+def _bundle(*, symbol: str = "BTCUSDT") -> QTRLongHistoricalBundle:
     return QTRLongHistoricalBundle(
         category="linear",
-        symbol="BTCUSDT",
+        symbol=symbol,
         start=BASE,
         end=END,
         execution_5m=_result(_series(minutes=5, count=49), "5.json"),
@@ -67,9 +68,37 @@ def test_runs_full_historical_mtf_integration_without_lookahead() -> None:
     assert result.stage_counts[LongHierarchyStage.NARRATIVE_4H] == 2
 
 
-def test_config_rejects_empty_symbol_and_invalid_history_window() -> None:
+def test_evaluation_start_excludes_warmup_decision_points() -> None:
+    result = run_qtr_long_hierarchy_backtest(
+        bundle=_bundle(),
+        config=QTRLongHierarchyBacktestConfig(
+            symbol="BTCUSDT",
+            evaluation_start=BASE + timedelta(hours=4, minutes=5),
+        ),
+    )
+
+    assert result.snapshots_processed == 1
+    assert result.skip_count == 1
+    assert result.stage_counts[LongHierarchyStage.NARRATIVE_4H] == 1
+
+
+def test_rejects_bundle_symbol_mismatch() -> None:
+    with pytest.raises(BacktestInputError, match="bundle symbol"):
+        run_qtr_long_hierarchy_backtest(
+            bundle=_bundle(symbol="ETHUSDT"),
+            config=QTRLongHierarchyBacktestConfig(symbol="BTCUSDT"),
+        )
+
+
+def test_config_rejects_invalid_values() -> None:
     with pytest.raises(ValueError, match="symbol must not be empty"):
         QTRLongHierarchyBacktestConfig(symbol=" ")
 
     with pytest.raises(ValueError, match="history_window"):
         QTRLongHierarchyBacktestConfig(symbol="BTCUSDT", history_window=0)
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        QTRLongHierarchyBacktestConfig(
+            symbol="BTCUSDT",
+            evaluation_start=datetime(2026, 1, 1),
+        )
