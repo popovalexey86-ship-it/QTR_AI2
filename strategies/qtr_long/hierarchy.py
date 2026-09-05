@@ -217,6 +217,7 @@ class QTRLongHierarchy:
             self._structure_shift = self._structure_shift_engine.confirm(
                 execution_5m.market_structure_state,
                 self._displacement,
+                execution_5m.market_data,
             )
             if self._structure_shift is None:
                 return self._skip(
