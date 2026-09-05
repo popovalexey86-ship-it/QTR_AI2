@@ -78,6 +78,8 @@ def format_diagnostic_report(
                     f"decision={decision.decision.value} "
                     f"reason={decision.reason}"
                 )
+                if decision.details is not None:
+                    lines.append(f"     details: {decision.details}")
 
     if result.buy_plans:
         lines.append("BUY plans:")
