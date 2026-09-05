@@ -1,0 +1,36 @@
+name: QTR Long vNext Annual Diagnostic
+
+on:
+  push:
+    branches:
+      - feature/qtr-long-smc-hierarchy
+    paths:
+      - ".github/workflows/qtr-long-vnext-annual-diagnostic.yml"
+  workflow_dispatch:
+
+jobs:
+  annual-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install runtime dependencies
+        run: python -m pip install --upgrade pip requests python-dotenv pybit
+      - name: Run BTCUSDT 12-month MTF diagnostic
+        run: |
+          python -m backtesting.qtr_long_mtf_diagnostic \
+            --symbol BTCUSDT \
+            --data-start 2024-01-01T00:00:00Z \
+            --evaluation-start 2024-04-01T00:00:00Z \
+            --end 2025-04-01T00:00:00Z \
+            --history-window 500 | tee qtr_long_vnext_annual_diagnostic.txt
+      - name: Upload diagnostic report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qtr-long-vnext-annual-diagnostic
+          path: qtr_long_vnext_annual_diagnostic.txt
+          if-no-files-found: warn
