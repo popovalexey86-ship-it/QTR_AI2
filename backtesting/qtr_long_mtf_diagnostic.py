@@ -18,6 +18,14 @@ from infrastructure.bybit.bybit_historical_client import BybitHistoricalClient
 from strategies.qtr_long.hierarchy import LongHierarchyStage
 
 
+_DEEP_STAGES = {
+    LongHierarchyStage.DISPLACEMENT_5M,
+    LongHierarchyStage.STRUCTURE_5M,
+    LongHierarchyStage.ENTRY_5M,
+    LongHierarchyStage.READY,
+}
+
+
 def _parse_utc(value: str) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None or parsed.utcoffset() is None:
@@ -48,6 +56,29 @@ def format_diagnostic_report(
     ]
     for stage in LongHierarchyStage:
         lines.append(f"  {stage.value}: {result.stage_counts.get(stage, 0)}")
+
+    if result.decision_times:
+        deep_candidates = [
+            (as_of, decision)
+            for as_of, decision in zip(
+                result.decision_times,
+                result.decisions,
+                strict=True,
+            )
+            if decision.stage in _DEEP_STAGES
+        ]
+        lines.append("Deep candidates:")
+        if not deep_candidates:
+            lines.append("  none")
+        else:
+            for index, (as_of, decision) in enumerate(deep_candidates, start=1):
+                lines.append(
+                    f"  #{index} as_of={as_of.isoformat()} "
+                    f"stage={decision.stage.value} "
+                    f"decision={decision.decision.value} "
+                    f"reason={decision.reason}"
+                )
+
     if result.buy_plans:
         lines.append("BUY plans:")
         for index, plan in enumerate(result.buy_plans, start=1):
