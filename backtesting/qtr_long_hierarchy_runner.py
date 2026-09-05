@@ -57,6 +57,13 @@ class QTRLongHierarchyBacktestRunner:
     fills, stops or targets yet. The purpose of this layer is to validate the
     multi-timeframe decision pipeline and collect stage diagnostics without
     silently coupling the new hierarchy to the legacy Genesis risk model.
+
+    ``evaluation_start`` defines an explicit warmup boundary. Contexts before
+    that time are still analyzed so the four stateful AnalysisEngine instances
+    can build market-structure state, but the hierarchy is not evaluated and no
+    decision diagnostics are counted before the evaluation period begins. This
+    keeps warmup infrastructure separate from strategy results and prevents a
+    5m execution sequence from starting before the frozen evaluation window.
     """
 
     def __init__(
@@ -65,12 +72,18 @@ class QTRLongHierarchyBacktestRunner:
         symbol: str,
         analysis: MTFAnalysisCoordinator,
         hierarchy: LongHierarchyEvaluator,
+        evaluation_start: datetime | None = None,
     ) -> None:
         if not symbol.strip():
             raise BacktestInputError("Backtest symbol cannot be empty.")
+        if evaluation_start is not None and (
+            evaluation_start.tzinfo is None or evaluation_start.utcoffset() is None
+        ):
+            raise BacktestInputError("evaluation_start must be timezone-aware.")
         self._symbol = symbol
         self._analysis = analysis
         self._hierarchy = hierarchy
+        self._evaluation_start = evaluation_start
         self._has_run = False
 
     def run(
@@ -85,8 +98,10 @@ class QTRLongHierarchyBacktestRunner:
         buy_plans: list[LongExecutionEntryPlan] = []
         stage_counts: Counter[LongHierarchyStage] = Counter()
         previous_as_of: datetime | None = None
+        contexts_seen = 0
 
         for position, context in enumerate(contexts, start=1):
+            contexts_seen += 1
             self._validate_context(
                 context,
                 position=position,
@@ -95,6 +110,12 @@ class QTRLongHierarchyBacktestRunner:
             previous_as_of = context.as_of
 
             analysis = self._analysis.analyze(context)
+            if (
+                self._evaluation_start is not None
+                and context.as_of < self._evaluation_start
+            ):
+                continue
+
             result = self._hierarchy.evaluate(
                 timeframe_context=context,
                 narrative_4h=analysis.narrative_4h,
@@ -110,8 +131,12 @@ class QTRLongHierarchyBacktestRunner:
                     raise RuntimeError("Hierarchy returned BUY_PLAN without an entry plan.")
                 buy_plans.append(result.entry_plan)
 
-        if not decisions:
+        if contexts_seen == 0:
             raise BacktestInputError("Historical QTR Long timeframe contexts cannot be empty.")
+        if not decisions:
+            raise BacktestInputError(
+                "QTR Long evaluation period contains no synchronized contexts."
+            )
 
         buy_plan_count = len(buy_plans)
         return QTRLongHierarchyBacktestResult(
