@@ -78,6 +78,13 @@ def _swings() -> list[Swing]:
     ]
 
 
+def _premium_swings() -> list[Swing]:
+    return [
+        Swing(index=1, timestamp=BASE - timedelta(hours=8), price=50.0, type=SwingType.LOW),
+        Swing(index=2, timestamp=BASE - timedelta(hours=4), price=100.0, type=SwingType.HIGH),
+    ]
+
+
 def _setup_state(*, with_liquidity: bool = True) -> MarketStructureState:
     if not with_liquidity:
         return MarketStructureState()
@@ -96,6 +103,8 @@ def _contexts(
     *,
     narrative_trend: Trend = Trend.BULLISH,
     structure_trend: Trend = Trend.BULLISH,
+    structure_swings: list[Swing] | None = None,
+    setup_swings: list[Swing] | None = None,
     poi_low: float = 94.0,
     poi_high: float = 98.0,
     with_liquidity: bool = True,
@@ -121,12 +130,13 @@ def _contexts(
     )
     context_1h = AnalysisContext(
         market_data=data_1h,
+        swings=_swings() if structure_swings is None else structure_swings,
         trend=structure_trend,
         market_structure_state=MarketStructureState(trend=structure_trend),
     )
     context_15m = AnalysisContext(
         market_data=data_15m,
-        swings=_swings(),
+        swings=[] if setup_swings is None else setup_swings,
         market_structure_state=_setup_state(with_liquidity=with_liquidity),
         order_block=OrderBlock(
             index=4,
@@ -208,7 +218,7 @@ def test_blocks_at_1h_structure() -> None:
     assert result.stage == LongHierarchyStage.STRUCTURE_1H
 
 
-def test_blocks_premium_15m_poi() -> None:
+def test_blocks_premium_15m_poi_using_1h_dealing_range() -> None:
     result = _evaluate(
         QTRLongHierarchy(),
         _contexts([_raid_candle()], poi_low=106.0, poi_high=108.0),
@@ -216,6 +226,19 @@ def test_blocks_premium_15m_poi() -> None:
 
     assert result.decision == LongHierarchyDecision.SKIP
     assert result.stage == LongHierarchyStage.POI_15M
+
+
+def test_1h_owns_dealing_range_and_15m_swings_cannot_override_it() -> None:
+    result = _evaluate(
+        QTRLongHierarchy(),
+        _contexts(
+            [_raid_candle()],
+            structure_swings=_swings(),
+            setup_swings=_premium_swings(),
+        ),
+    )
+
+    assert result.stage != LongHierarchyStage.POI_15M
 
 
 def test_requires_15m_sell_side_liquidity_before_execution() -> None:
