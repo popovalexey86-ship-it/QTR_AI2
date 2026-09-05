@@ -17,22 +17,14 @@ _QTR_LONG_INTERVALS = ("5", "15", "60", "240")
 class QTRLongHistoricalBundle:
     """Historical candles required by the four-layer QTR Long hierarchy."""
 
+    category: str
+    symbol: str
+    start: datetime
+    end: datetime
     execution_5m: HistoricalDataResult
     setup_15m: HistoricalDataResult
     structure_1h: HistoricalDataResult
     narrative_4h: HistoricalDataResult
-
-    @property
-    def symbol(self) -> str:
-        """Return the common symbol encoded by the cache requests' data set.
-
-        The bundle itself intentionally stores only loaded results. Request
-        identity stays in the loader inputs so historical cache semantics remain
-        centralized in ``HistoricalRequest`` / ``HistoricalCandleCache``.
-        """
-        if not self.execution_5m.candles:
-            return ""
-        return ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +69,10 @@ def load_qtr_long_historical_bundle(
     ]
 
     return QTRLongHistoricalBundle(
+        category=request.category,
+        symbol=request.symbol,
+        start=request.start,
+        end=request.end,
         execution_5m=results[0],
         setup_15m=results[1],
         structure_1h=results[2],
