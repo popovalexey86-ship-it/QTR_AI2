@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 
 from core.bos import BOS
@@ -103,7 +104,10 @@ class LongStructureShiftEngine:
         return 0 <= delta <= self._max_candles_after_displacement
 
     @staticmethod
-    def _confirmation_index(market_data: MarketData, timestamp) -> int | None:
+    def _confirmation_index(
+        market_data: MarketData,
+        timestamp: datetime,
+    ) -> int | None:
         for candle in reversed(market_data.candles):
             if candle.timestamp == timestamp:
                 return candle.index
