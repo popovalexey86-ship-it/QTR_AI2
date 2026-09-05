@@ -60,11 +60,11 @@ def test_runs_full_historical_mtf_integration_without_lookahead() -> None:
     )
 
     assert result.symbol == "BTCUSDT"
-    assert result.snapshots_processed == 1
+    assert result.snapshots_processed == 2
     assert result.buy_plan_count == 0
-    assert result.skip_count == 1
-    assert sum(result.stage_counts.values()) == 1
-    assert result.stage_counts[LongHierarchyStage.NARRATIVE_4H] == 1
+    assert result.skip_count == 2
+    assert sum(result.stage_counts.values()) == 2
+    assert result.stage_counts[LongHierarchyStage.NARRATIVE_4H] == 2
 
 
 def test_config_rejects_empty_symbol_and_invalid_history_window() -> None:
