@@ -135,6 +135,30 @@ def test_collects_buy_plans_and_stage_diagnostics() -> None:
     assert hierarchy.calls == 3
 
 
+def test_warmup_analysis_runs_before_evaluation_without_counting_decisions() -> None:
+    coordinator = FakeCoordinator()
+    hierarchy = FakeHierarchy([_skip(LongHierarchyStage.NARRATIVE_4H)])
+    evaluation_start = BASE + timedelta(minutes=15)
+    runner = QTRLongHierarchyBacktestRunner(
+        symbol="BTCUSDT",
+        analysis=coordinator,
+        hierarchy=hierarchy,
+        evaluation_start=evaluation_start,
+    )
+    contexts = [
+        _context(as_of=BASE + timedelta(minutes=5 * index))
+        for index in (1, 2, 3)
+    ]
+
+    result = runner.run(contexts)
+
+    assert coordinator.calls == 3
+    assert hierarchy.calls == 1
+    assert result.snapshots_processed == 1
+    assert result.skip_count == 1
+    assert result.stage_counts[LongHierarchyStage.NARRATIVE_4H] == 1
+
+
 def test_rejects_empty_input_and_is_single_use() -> None:
     runner = QTRLongHierarchyBacktestRunner(
         symbol="BTCUSDT",
@@ -147,6 +171,18 @@ def test_rejects_empty_input_and_is_single_use() -> None:
 
     with pytest.raises(RuntimeError, match="only run once"):
         runner.run([])
+
+
+def test_rejects_evaluation_window_without_synchronized_contexts() -> None:
+    runner = QTRLongHierarchyBacktestRunner(
+        symbol="BTCUSDT",
+        analysis=FakeCoordinator(),
+        hierarchy=FakeHierarchy([]),
+        evaluation_start=BASE + timedelta(days=1),
+    )
+
+    with pytest.raises(BacktestInputError, match="evaluation period"):
+        runner.run([_context(as_of=BASE + timedelta(hours=4))])
 
 
 def test_rejects_wrong_symbol_before_analysis() -> None:
@@ -178,10 +214,18 @@ def test_rejects_duplicate_or_backward_as_of() -> None:
         ])
 
 
-def test_rejects_empty_symbol_at_construction() -> None:
+def test_rejects_empty_symbol_and_naive_evaluation_start_at_construction() -> None:
     with pytest.raises(BacktestInputError, match="symbol cannot be empty"):
         QTRLongHierarchyBacktestRunner(
             symbol=" ",
             analysis=FakeCoordinator(),
             hierarchy=FakeHierarchy([]),
+        )
+
+    with pytest.raises(BacktestInputError, match="timezone-aware"):
+        QTRLongHierarchyBacktestRunner(
+            symbol="BTCUSDT",
+            analysis=FakeCoordinator(),
+            hierarchy=FakeHierarchy([]),
+            evaluation_start=datetime(2026, 1, 1),
         )
