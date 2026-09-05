@@ -54,27 +54,31 @@ class QTRLongMTFAnalysisCoordinator:
     def analyze(self, context: QTRLongTimeframeContext) -> QTRLongMTFAnalysis:
         execution = self._execution_5m_engine.analyze(context.execution_5m)
 
-        self._setup_15m = self._refresh_if_advanced(
+        setup = self._refresh_if_advanced(
             current=self._setup_15m,
             market_data=context.setup_15m,
             engine=self._setup_15m_engine,
         )
-        self._structure_1h = self._refresh_if_advanced(
+        structure = self._refresh_if_advanced(
             current=self._structure_1h,
             market_data=context.structure_1h,
             engine=self._structure_1h_engine,
         )
-        self._narrative_4h = self._refresh_if_advanced(
+        narrative = self._refresh_if_advanced(
             current=self._narrative_4h,
             market_data=context.narrative_4h,
             engine=self._narrative_4h_engine,
         )
 
+        self._setup_15m = setup
+        self._structure_1h = structure
+        self._narrative_4h = narrative
+
         return QTRLongMTFAnalysis(
             execution_5m=execution,
-            setup_15m=self._setup_15m,
-            structure_1h=self._structure_1h,
-            narrative_4h=self._narrative_4h,
+            setup_15m=setup,
+            structure_1h=structure,
+            narrative_4h=narrative,
         )
 
     @staticmethod
