@@ -1,6 +1,6 @@
 from collections import deque
 from collections.abc import Iterable, Iterator
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from backtesting.backtest_runner import BacktestInputError
 from core.candle import Candle
@@ -115,7 +115,7 @@ def iter_qtr_long_timeframe_contexts(
 
 def _validated_candles(candles: Iterable[Candle], *, layer: str) -> tuple[Candle, ...]:
     result = tuple(candles)
-    previous = None
+    previous: datetime | None = None
     for candle in result:
         if previous is not None:
             if candle.timestamp == previous:
@@ -136,7 +136,7 @@ def _admit_closed(
     history: deque[Candle],
     *,
     timeframe: str,
-    as_of,
+    as_of: datetime,
 ) -> int:
     delta = _TIMEFRAMES[timeframe]
     while position < len(candles):
@@ -153,7 +153,7 @@ def _market_data(
     symbol: str,
     timeframe: str,
     candles: deque[Candle],
-    loaded_at,
+    loaded_at: datetime,
 ) -> MarketData:
     return MarketData(
         symbol=symbol,
