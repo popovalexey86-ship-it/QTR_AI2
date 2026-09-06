@@ -23,10 +23,10 @@ def test_bullish_narrative_allows_long_search():
     )
 
 
-def test_neutral_narrative_blocks_long_search():
+def test_neutral_narrative_allows_long_search_as_context():
     assert (
         LongNarrativeGate().evaluate(make_narrative(LongNarrativeBias.NEUTRAL))
-        == LongNarrativeDecision.BLOCK
+        == LongNarrativeDecision.ALLOW
     )
 
 
