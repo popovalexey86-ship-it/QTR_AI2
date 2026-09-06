@@ -25,7 +25,9 @@ jobs:
       - name: Install runtime dependencies
         run: python -m pip install --upgrade pip requests python-dotenv pybit
       - name: Run BTCUSDT 12-month MTF diagnostic
+        shell: bash
         run: |
+          set -o pipefail
           python -m backtesting.qtr_long_mtf_diagnostic \
             --symbol BTCUSDT \
             --data-start 2024-01-01T00:00:00Z \
