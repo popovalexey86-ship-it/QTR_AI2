@@ -218,14 +218,14 @@ def test_blocks_at_1h_structure() -> None:
     assert result.stage == LongHierarchyStage.STRUCTURE_1H
 
 
-def test_blocks_premium_15m_poi_using_1h_dealing_range() -> None:
+def test_allows_premium_15m_poi_inside_1h_dealing_range() -> None:
     result = _evaluate(
         QTRLongHierarchy(),
         _contexts([_raid_candle()], poi_low=106.0, poi_high=108.0),
     )
 
     assert result.decision == LongHierarchyDecision.SKIP
-    assert result.stage == LongHierarchyStage.POI_15M
+    assert result.stage == LongHierarchyStage.DISPLACEMENT_5M
 
 
 def test_1h_owns_dealing_range_and_15m_swings_cannot_override_it() -> None:
