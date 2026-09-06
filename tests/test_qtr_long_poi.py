@@ -81,10 +81,21 @@ def test_equilibrium_bullish_order_block_allows_poi() -> None:
     assert result.poi.zone == DealingRangeZone.EQUILIBRIUM
 
 
-def test_premium_order_block_is_blocked() -> None:
+def test_premium_order_block_allows_poi_inside_structural_range() -> None:
     result = LongPOIEngine().evaluate(
         dealing_range=_range(),
         order_block=_ob(low=170.0, high=180.0),
+    )
+
+    assert result.decision == LongPOIDecision.ALLOW
+    assert result.poi is not None
+    assert result.poi.zone == DealingRangeZone.PREMIUM
+
+
+def test_order_block_outside_structural_range_is_blocked() -> None:
+    result = LongPOIEngine().evaluate(
+        dealing_range=_range(),
+        order_block=_ob(low=205.0, high=215.0),
     )
 
     assert result.decision == LongPOIDecision.BLOCK
@@ -129,15 +140,15 @@ def test_overlapping_active_bullish_fvg_is_linked_as_confluence() -> None:
     assert result.poi.fair_value_gap == fvg
 
 
-def test_fvg_cannot_rescue_invalid_location_and_unrelated_fvg_is_not_linked() -> None:
+def test_fvg_cannot_rescue_outside_range_and_unrelated_fvg_is_not_linked() -> None:
     engine = LongPOIEngine()
 
-    premium = engine.evaluate(
+    outside = engine.evaluate(
         dealing_range=_range(),
-        order_block=_ob(low=170.0, high=180.0),
-        fair_value_gap=_fvg(low=170.0, high=180.0),
+        order_block=_ob(low=205.0, high=215.0),
+        fair_value_gap=_fvg(low=205.0, high=215.0),
     )
-    assert premium.decision == LongPOIDecision.BLOCK
+    assert outside.decision == LongPOIDecision.BLOCK
 
     unrelated = engine.evaluate(
         dealing_range=_range(),
