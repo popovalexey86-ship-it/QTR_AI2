@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from math import prod
 
 from backtesting.qtr_long_hierarchy_runner import QTRLongHierarchyBacktestResult
 from core.candle import Candle
@@ -73,18 +72,15 @@ def run_qtr_long_execution_backtest(
     execution_candles: tuple[Candle, ...] | list[Candle],
     config: LongExecutionBacktestConfig = LongExecutionBacktestConfig(),
 ) -> LongExecutionBacktestResult:
-    """Simulate the frozen Candidate B BUY plans on closed 5m candles.
+    """Simulate frozen Candidate B BUY plans on closed 5m candles.
 
-    Contract:
-    - the limit order becomes eligible only on the first candle whose open time
-      is at or after the BUY_PLAN decision time (the candle after confirmation);
-    - the pending BUY expires after ``pending_ttl_candles`` 5m candles;
-    - TP is fixed at ``entry + rr * (entry - stop)``;
-    - if SL and TP are both touched in one candle, SL wins (conservative OHLC rule);
-    - unfilled plans are EXPIRED and positions still alive at the dataset end are OPEN;
-    - results are expressed in R. Equity compounds fixed-fractional risk on closed trades.
+    The limit becomes eligible on the first candle opening at or after the
+    BUY_PLAN decision time, so the confirmation candle itself cannot fill it.
+    Pending orders expire after ``pending_ttl_candles``. TP is fixed at RR from
+    the structural stop. If SL and TP are both touched in one OHLC candle, SL is
+    assumed first. Results are expressed in R and fixed-fractional equity.
 
-    The first execution study deliberately excludes fees, funding and slippage.
+    Fees, funding and slippage are intentionally excluded from this first pass.
     """
     candles = tuple(execution_candles)
     if not candles:
@@ -138,8 +134,7 @@ def run_qtr_long_execution_backtest(
     max_drawdown_pct = 0.0
     for value in equity_curve:
         peak = max(peak, value)
-        drawdown = (peak - value) / peak
-        max_drawdown_pct = max(max_drawdown_pct, drawdown)
+        max_drawdown_pct = max(max_drawdown_pct, (peak - value) / peak)
 
     return LongExecutionBacktestResult(
         plans=len(trades),
@@ -195,8 +190,6 @@ def _simulate_plan(
             result_r=0.0,
         )
 
-    # The fill candle is eligible for exit. When both barriers are inside the
-    # same OHLC candle, assume the adverse barrier was reached first.
     post_fill = eligible[fill_position:]
     for candle in post_fill:
         stop_hit = candle.low <= plan.stop_loss
