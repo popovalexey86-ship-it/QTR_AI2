@@ -6,6 +6,11 @@ on:
       - feature/qtr-long-smc-hierarchy
     paths:
       - ".github/workflows/qtr-long-vnext-annual-diagnostic.yml"
+      - "strategies/qtr_long/narrative.py"
+      - "strategies/qtr_long/poi.py"
+      - "strategies/qtr_long/hierarchy.py"
+      - "strategies/qtr_long/execution_*.py"
+      - "tests/test_qtr_long_*.py"
   workflow_dispatch:
 
 jobs:
