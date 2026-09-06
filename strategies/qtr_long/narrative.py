@@ -38,18 +38,21 @@ class LongNarrative:
 
 
 class LongNarrativeGate:
-    """Mandatory first gate in the QTR Long vNext hierarchy.
+    """4H directional veto for the QTR Long hierarchy.
 
-    Only an explicit bullish HTF narrative allows the strategy to continue.
-    Neutral and bearish narratives produce SKIP downstream. They never create
-    SELL/SHORT permission.
+    The 4H layer is now context rather than a bullish-only permission gate.
+    Bullish and neutral narratives may continue to lower-timeframe validation;
+    only an explicit bearish narrative vetoes a LONG search. Missing narrative
+    still blocks because the hierarchy must not trade without HTF context.
+
+    This remains LONG-only: bearish context never creates SELL/SHORT permission.
     """
 
     def evaluate(self, narrative: LongNarrative | None) -> LongNarrativeDecision:
         if narrative is None:
             return LongNarrativeDecision.BLOCK
 
-        if narrative.bias == LongNarrativeBias.BULLISH:
-            return LongNarrativeDecision.ALLOW
+        if narrative.bias == LongNarrativeBias.BEARISH:
+            return LongNarrativeDecision.BLOCK
 
-        return LongNarrativeDecision.BLOCK
+        return LongNarrativeDecision.ALLOW
