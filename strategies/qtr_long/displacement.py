@@ -17,28 +17,21 @@ class LongDisplacement:
 
 
 class LongDisplacementEngine:
-    """Detect a decisive bullish impulse after a 5m liquidity raid.
+    """Detect bullish impulse after a 5m liquidity raid.
 
-    The first vNext contract deliberately uses transparent, fixed structural
-    heuristics rather than a tunable score. A qualifying candle must:
-    - occur after the raid and within a small execution window;
-    - close above its open;
-    - have a large real body relative to its total range;
-    - expand beyond the recent median candle range;
-    - close near the candle high;
-    - close above the raid reclaim close.
-
-    These gates are execution evidence only. They never create SHORT permission.
+    Candidate B keeps the same qualitative requirements but widens the timing
+    window and lowers the impulse thresholds so moderate but still directional
+    expansion can qualify. This remains LONG-only evidence.
     """
 
     def __init__(
         self,
         *,
-        max_candles_after_raid: int = 3,
+        max_candles_after_raid: int = 5,
         lookback: int = 5,
-        minimum_body_ratio: float = 0.60,
-        minimum_range_expansion: float = 1.20,
-        minimum_close_location: float = 0.75,
+        minimum_body_ratio: float = 0.50,
+        minimum_range_expansion: float = 1.00,
+        minimum_close_location: float = 0.65,
     ) -> None:
         if max_candles_after_raid < 1:
             raise ValueError("max_candles_after_raid must be >= 1")
