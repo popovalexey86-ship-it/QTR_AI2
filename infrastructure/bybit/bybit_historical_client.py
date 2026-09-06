@@ -4,6 +4,8 @@ import re
 from typing import Any
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from core.candle import Candle
 from infrastructure.bybit.bybit_historical_mapper import (
@@ -15,6 +17,9 @@ from infrastructure.bybit.bybit_historical_mapper import (
 
 PUBLIC_KLINE_URL = "https://api.bybit.com/v5/market/kline"
 MAX_PAGE_SIZE = 1000
+MAX_RETRIES = 4
+RETRY_BACKOFF_FACTOR = 0.5
+RETRY_STATUS_CODES = (429, 500, 502, 503, 504)
 _SYMBOL_PATTERN = re.compile(r"^[A-Z0-9]+$")
 
 
@@ -27,9 +32,27 @@ class BybitHistoricalClient:
         timeout: tuple[float, float] = (3.05, 15.0),
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        self._session = session or requests.Session()
+        self._session = session or self._build_retry_session()
         self._timeout = timeout
         self._clock = clock or (lambda: datetime.now(UTC))
+
+    @staticmethod
+    def _build_retry_session() -> requests.Session:
+        retry = Retry(
+            total=MAX_RETRIES,
+            connect=MAX_RETRIES,
+            read=MAX_RETRIES,
+            status=MAX_RETRIES,
+            allowed_methods=frozenset({"GET"}),
+            status_forcelist=RETRY_STATUS_CODES,
+            backoff_factor=RETRY_BACKOFF_FACTOR,
+            respect_retry_after_header=True,
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+        session = requests.Session()
+        session.mount("https://", adapter)
+        return session
 
     def fetch_candles(
         self,
@@ -109,9 +132,15 @@ class BybitHistoricalClient:
             )
             response.raise_for_status()
             payload: Any = response.json()
-        except requests.RequestException:
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else "unknown"
             raise HistoricalDataError(
-                "Bybit historical request failed."
+                f"Bybit historical request failed after retries (HTTP {status})."
+            ) from None
+        except requests.RequestException as exc:
+            raise HistoricalDataError(
+                "Bybit historical request failed after retries "
+                f"({type(exc).__name__})."
             ) from None
         except ValueError:
             raise HistoricalDataError(
