@@ -9,6 +9,10 @@ from strategies.qtr_long.execution_entry import (
     LongExecutionEntryEngine,
     LongExecutionEntryPlan,
 )
+from strategies.qtr_long.execution_quality import (
+    LongExecutionQualityDecision,
+    LongExecutionQualityGate,
+)
 from strategies.qtr_long.execution_raid import LongLiquidityRaid, LongLiquidityRaidDetector
 from strategies.qtr_long.execution_structure import (
     LongStructureShift,
@@ -38,6 +42,7 @@ class LongHierarchyStage(Enum):
     RAID_5M = "raid_5m"
     DISPLACEMENT_5M = "displacement_5m"
     STRUCTURE_5M = "structure_5m"
+    QUALITY_5M = "quality_5m"
     ENTRY_5M = "entry_5m"
     READY = "ready"
 
@@ -60,9 +65,9 @@ class LongHierarchyResult:
 class QTRLongHierarchy:
     """Stateful LONG-only vNext hierarchy.
 
-    Candidate B keeps bearish higher-timeframe vetoes and strict LONG-only
-    execution semantics, but allows more time for raid -> displacement ->
-    structure confirmation to develop.
+    Candidate C preserves Candidate B discovery frequency but adds one narrow
+    execution-quality hypothesis: do not buy while the latest 5m BOS is bearish
+    and do not buy after an overextended bullish displacement.
     """
 
     def __init__(
@@ -92,6 +97,7 @@ class QTRLongHierarchy:
         self._structure_shift_engine = LongStructureShiftEngine(
             max_candles_after_displacement=max_candles_after_displacement,
         )
+        self._quality_gate = LongExecutionQualityGate()
         self._entry_engine = LongExecutionEntryEngine()
 
         self._active_symbol: str | None = None
@@ -191,6 +197,19 @@ class QTRLongHierarchy:
                     details=self._execution_details(execution_5m),
                 )
 
+        quality = self._quality_gate.evaluate(
+            displacement=self._displacement,
+            state=execution_5m.market_structure_state,
+        )
+        if quality.decision != LongExecutionQualityDecision.ALLOW:
+            details = self._execution_details(execution_5m)
+            self._reset_execution()
+            return self._skip(
+                LongHierarchyStage.QUALITY_5M,
+                quality.reason,
+                details=details,
+            )
+
         plan = self._entry_engine.build(
             raid=self._raid,
             displacement=self._displacement,
@@ -210,7 +229,7 @@ class QTRLongHierarchy:
         result = LongHierarchyResult(
             decision=LongHierarchyDecision.BUY_PLAN,
             stage=LongHierarchyStage.READY,
-            reason="hierarchical QTR Long sequence confirmed",
+            reason="hierarchical QTR Long Candidate C sequence confirmed",
             entry_plan=plan,
             details=self._execution_details(execution_5m),
         )
