@@ -20,13 +20,7 @@ class LongExecutionZoneSource(Enum):
 
 @dataclass(frozen=True, slots=True)
 class LongExecutionEntryPlan:
-    """Pending BUY plan for a future 5m retrace into execution value.
-
-    The plan is created only after the raid -> displacement -> bullish structure
-    sequence is complete. It does not wait for a future retrace candle and
-    therefore avoids lookahead: the broker may place a resting limit order at
-    ``entry`` and let later price action decide whether it is filled.
-    """
+    """Pending BUY plan for a future 5m retrace into execution value."""
 
     source: LongExecutionZoneSource
     zone_low: float
@@ -46,15 +40,16 @@ class LongExecutionEntryPlan:
 class LongExecutionEntryEngine:
     """Build a LONG-only limit-entry plan from a valid 5m execution POI.
 
-    Qualifying execution value must be bullish, still active, formed no earlier
-    than the liquidity raid and no later than the confirmed structural shift.
-    If a bullish FVG and bullish Order Block overlap, their intersection is used
-    as the highest-confluence execution zone. Otherwise the FVG is preferred,
-    with the Order Block as a fallback.
-
-    This engine creates only a BUY plan or nothing. It never creates SELL/SHORT
-    permission.
+    Candidate B permits a still-active bullish FVG/OB created up to two 5m
+    candles before the liquidity raid. This lets the raid react through a very
+    recent execution POI instead of demanding that value be created only after
+    the raid. Future data is never used.
     """
+
+    def __init__(self, *, max_zone_age_before_raid: int = 2) -> None:
+        if max_zone_age_before_raid < 0:
+            raise ValueError("max_zone_age_before_raid must be >= 0")
+        self._max_zone_age_before_raid = max_zone_age_before_raid
 
     def build(
         self,
@@ -70,14 +65,15 @@ class LongExecutionEntryEngine:
         if structure_shift.index < displacement.candle.index:
             return None
 
+        start_index = max(0, raid.candle.index - self._max_zone_age_before_raid)
         fvg = self._valid_fvg(
             fair_value_gap,
-            start_index=raid.candle.index,
+            start_index=start_index,
             end_index=structure_shift.index,
         )
         ob = self._valid_order_block(
             order_block,
-            start_index=raid.candle.index,
+            start_index=start_index,
             end_index=structure_shift.index,
         )
 
