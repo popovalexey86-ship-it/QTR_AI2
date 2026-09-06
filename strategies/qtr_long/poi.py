@@ -48,21 +48,21 @@ class LongPOIResult:
 
 
 class LongPOIEngine:
-    """Mandatory 15m location/POI gate.
+    """15m structural POI gate with relaxed location permission.
 
-    Rules are deliberately structural rather than additive:
-    - a confirmed dealing range must exist;
-    - the active Order Block must be bullish and not invalidated;
-    - the Order Block midpoint must sit in discount or equilibrium;
-    - a bullish active FVG may strengthen the POI only when it overlaps the OB,
-      but it is not mandatory and cannot rescue an invalid location.
+    The active Order Block is still required to be bullish and valid, but its
+    midpoint may now sit anywhere inside the confirmed 1H dealing range:
+    discount, equilibrium or premium. Only locations outside the structural
+    range are rejected. This lets 5m execution evidence decide whether a
+    premium-location setup is actually tradable instead of blocking it early.
 
-    Premium/above-range POIs are rejected so QTR Long does not chase price.
+    A bullish active FVG remains optional confluence when it overlaps the OB.
     """
 
     _ALLOWED_ZONES = {
         DealingRangeZone.DISCOUNT,
         DealingRangeZone.EQUILIBRIUM,
+        DealingRangeZone.PREMIUM,
     }
 
     def evaluate(
