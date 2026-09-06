@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
 
-from core.bos_type import BOSType
 from core.market_structure_state import MarketStructureState
 from core.trend import Trend
 
@@ -22,12 +21,13 @@ class LongStructureConfirmation:
 
 
 class LongStructureConfirmationGate:
-    """Mandatory 1H gate between the 4H narrative and lower-timeframe setup.
+    """1H directional safety gate for QTR Long.
 
-    QTR Long requires bullish 1H structure. A RANGE state is accepted only when
-    the latest confirmed structural break is bullish, which represents an early
-    transition toward bullish structure. Bearish structure can only reject a
-    LONG; it never creates SELL/SHORT permission.
+    The relaxed candidate keeps only an explicit bearish 1H trend as a hard
+    veto. Bullish and range regimes may continue to the lower-timeframe setup,
+    where the 15m/5m layers must still provide LONG-specific evidence.
+
+    Bearish structure never creates SELL/SHORT permission.
     """
 
     def evaluate(
@@ -36,23 +36,22 @@ class LongStructureConfirmationGate:
         trend: Trend | None,
         state: MarketStructureState | None = None,
     ) -> LongStructureConfirmation:
+        del state  # retained in the contract for diagnostics/future ranking
+
         if trend == Trend.BULLISH:
             return LongStructureConfirmation(
                 decision=LongStructureDecision.CONFIRMED,
                 reason="1H trend is bullish",
             )
 
-        if trend == Trend.RANGE and state is not None and state.last_bos is not None:
-            if state.last_bos.type == BOSType.BULLISH:
-                return LongStructureConfirmation(
-                    decision=LongStructureDecision.CONFIRMED,
-                    reason="1H range has a bullish structural break",
-                )
+        if trend == Trend.RANGE:
+            return LongStructureConfirmation(
+                decision=LongStructureDecision.CONFIRMED,
+                reason="1H range is permitted for lower-timeframe LONG confirmation",
+            )
 
         if trend == Trend.BEARISH:
             reason = "1H trend is bearish"
-        elif trend == Trend.RANGE:
-            reason = "1H range lacks bullish structural confirmation"
         else:
             reason = "1H structure is unavailable"
 
