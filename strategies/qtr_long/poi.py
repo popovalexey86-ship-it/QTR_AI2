@@ -11,7 +11,7 @@ from strategies.qtr_long.dealing_range import DealingRange, DealingRangeZone
 
 
 class LongPOIDecision(Enum):
-    """Whether the 15m layer contains a valid area to hunt a 5m LONG trigger."""
+    """Whether the 15m layer contains usable context to hunt a 5m LONG trigger."""
 
     ALLOW = "allow"
     BLOCK = "block"
@@ -19,25 +19,33 @@ class LongPOIDecision(Enum):
 
 @dataclass(frozen=True, slots=True)
 class LongPOI:
-    """15m point/area of interest for the hierarchical QTR Long model.
+    """15m context for the hierarchical QTR Long model.
 
-    This is not an entry signal. A valid POI only grants permission to descend
-    to the 5m execution layer and wait for a separate liquidity raid,
-    displacement and structural confirmation.
+    Candidate B no longer requires a 15m Order Block. A valid bullish active
+    FVG may provide the location context by itself. This layer is context only;
+    it never creates an entry without the 5m execution sequence.
     """
 
-    order_block: OrderBlock
     dealing_range: DealingRange
     zone: DealingRangeZone
+    order_block: OrderBlock | None = None
     fair_value_gap: FairValueGap | None = None
 
     @property
     def low(self) -> float:
-        return self.order_block.low
+        if self.order_block is not None:
+            return self.order_block.low
+        if self.fair_value_gap is not None:
+            return self.fair_value_gap.low
+        raise RuntimeError("POI requires an order block or fair value gap")
 
     @property
     def high(self) -> float:
-        return self.order_block.high
+        if self.order_block is not None:
+            return self.order_block.high
+        if self.fair_value_gap is not None:
+            return self.fair_value_gap.high
+        raise RuntimeError("POI requires an order block or fair value gap")
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,15 +56,12 @@ class LongPOIResult:
 
 
 class LongPOIEngine:
-    """15m structural POI gate with relaxed location permission.
+    """Relaxed 15m context gate.
 
-    The active Order Block is still required to be bullish and valid, but its
-    midpoint may now sit anywhere inside the confirmed 1H dealing range:
-    discount, equilibrium or premium. Only locations outside the structural
-    range are rejected. This lets 5m execution evidence decide whether a
-    premium-location setup is actually tradable instead of blocking it early.
-
-    A bullish active FVG remains optional confluence when it overlaps the OB.
+    A confirmed 1H dealing range is still required. Inside that range, either a
+    valid bullish Order Block or a valid active bullish FVG is sufficient to let
+    the strategy descend to 5m execution. Premium is allowed; only locations
+    outside the structural range are rejected.
     """
 
     _ALLOWED_ZONES = {
@@ -75,46 +80,70 @@ class LongPOIEngine:
         if dealing_range is None:
             return LongPOIResult(LongPOIDecision.BLOCK, None, "missing dealing range")
 
-        if order_block is None:
-            return LongPOIResult(LongPOIDecision.BLOCK, None, "missing order block")
+        valid_ob = self._valid_bullish_ob(order_block)
+        valid_fvg = self._valid_bullish_fvg(fair_value_gap)
 
-        if order_block.direction != OrderBlockDirection.BULLISH:
-            return LongPOIResult(LongPOIDecision.BLOCK, None, "order block is not bullish")
+        if valid_ob is None and valid_fvg is None:
+            return LongPOIResult(
+                LongPOIDecision.BLOCK,
+                None,
+                "missing valid bullish 15m OB/FVG context",
+            )
 
-        if order_block.status == OrderBlockStatus.INVALIDATED:
-            return LongPOIResult(LongPOIDecision.BLOCK, None, "order block is invalidated")
+        anchor_low: float
+        anchor_high: float
+        if valid_ob is not None:
+            anchor_low = valid_ob.low
+            anchor_high = valid_ob.high
+        else:
+            assert valid_fvg is not None
+            anchor_low = valid_fvg.low
+            anchor_high = valid_fvg.high
 
-        zone = dealing_range.locate(order_block.midpoint)
+        midpoint = (anchor_low + anchor_high) / 2.0
+        zone = dealing_range.locate(midpoint)
         if zone not in self._ALLOWED_ZONES:
             return LongPOIResult(
                 LongPOIDecision.BLOCK,
                 None,
-                f"order block location is {zone.value}",
+                f"15m context location is {zone.value}",
             )
 
-        linked_fvg = self._linked_bullish_fvg(order_block, fair_value_gap)
+        linked_fvg = valid_fvg
+        if valid_ob is not None and valid_fvg is not None:
+            overlaps = valid_fvg.low <= valid_ob.high and valid_fvg.high >= valid_ob.low
+            if not overlaps:
+                linked_fvg = None
+
         poi = LongPOI(
-            order_block=order_block,
             dealing_range=dealing_range,
             zone=zone,
+            order_block=valid_ob,
             fair_value_gap=linked_fvg,
         )
-        return LongPOIResult(LongPOIDecision.ALLOW, poi, "valid 15m long POI")
+        source = "OB" if valid_ob is not None else "FVG"
+        return LongPOIResult(
+            LongPOIDecision.ALLOW,
+            poi,
+            f"valid 15m long context from {source}",
+        )
 
     @staticmethod
-    def _linked_bullish_fvg(
-        order_block: OrderBlock,
-        fair_value_gap: FairValueGap | None,
-    ) -> FairValueGap | None:
+    def _valid_bullish_ob(order_block: OrderBlock | None) -> OrderBlock | None:
+        if order_block is None:
+            return None
+        if order_block.direction != OrderBlockDirection.BULLISH:
+            return None
+        if order_block.status == OrderBlockStatus.INVALIDATED:
+            return None
+        return order_block
+
+    @staticmethod
+    def _valid_bullish_fvg(fair_value_gap: FairValueGap | None) -> FairValueGap | None:
         if fair_value_gap is None:
             return None
         if fair_value_gap.direction != FairValueGapDirection.BULLISH:
             return None
         if fair_value_gap.status == FairValueGapStatus.FILLED:
             return None
-
-        overlaps = (
-            fair_value_gap.low <= order_block.high
-            and fair_value_gap.high >= order_block.low
-        )
-        return fair_value_gap if overlaps else None
+        return fair_value_gap
