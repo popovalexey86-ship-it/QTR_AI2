@@ -26,15 +26,11 @@ from strategies.qtr_long.timeframe_context import QTRLongTimeframeContext
 
 
 class LongHierarchyDecision(Enum):
-    """Terminal decision emitted by the vNext QTR Long hierarchy."""
-
     BUY_PLAN = "buy_plan"
     SKIP = "skip"
 
 
 class LongHierarchyStage(Enum):
-    """Gate that produced the current hierarchical result."""
-
     NARRATIVE_4H = "narrative_4h"
     STRUCTURE_1H = "structure_1h"
     POI_15M = "poi_15m"
@@ -48,14 +44,6 @@ class LongHierarchyStage(Enum):
 
 @dataclass(frozen=True, slots=True)
 class LongHierarchyResult:
-    """One hierarchical QTR Long evaluation result.
-
-    A result is either a pending BUY plan or an explicit SKIP with the gate that
-    stopped the sequence. SELL/SHORT is intentionally absent from the domain.
-    ``details`` is optional forensic text for diagnostics only; it never affects
-    strategy decisions.
-    """
-
     decision: LongHierarchyDecision
     stage: LongHierarchyStage
     reason: str
@@ -70,39 +58,18 @@ class LongHierarchyResult:
 
 
 class QTRLongHierarchy:
-    """Stateful, LONG-only orchestration of the vNext SMC hierarchy.
+    """Stateful LONG-only vNext hierarchy.
 
-    The hierarchy is evaluated from top to bottom on synchronized closed-candle
-    analysis contexts:
-
-        4H narrative
-        -> 1H structure confirmation + structural dealing range
-        -> 15m POI inside the 1H dealing range
-        -> 15m sell-side liquidity map
-        -> 5m liquidity raid
-        -> 5m displacement
-        -> 5m bullish MSS/BOS
-        -> 5m execution FVG/OB
-        -> pending BUY plan
-
-    The 1H layer owns the structural dealing range. The 15m layer supplies the
-    candidate bullish POI and liquidity map; it does not redefine the higher-
-    timeframe range used for location permission.
-
-    Execution evidence is stateful across successive 5m snapshots. A liquidity
-    raid is recorded only when it happens on the current terminal 5m candle;
-    the pipeline never scans old candles with a newer 15m liquidity map. This is
-    important because doing so could retroactively introduce look-ahead bias.
-
-    Any failed mandatory higher-timeframe gate clears the active 5m sequence.
-    The only terminal actions are BUY_PLAN and SKIP.
+    Candidate B keeps bearish higher-timeframe vetoes and strict LONG-only
+    execution semantics, but allows more time for raid -> displacement ->
+    structure confirmation to develop.
     """
 
     def __init__(
         self,
         *,
-        max_candles_after_raid: int = 3,
-        max_candles_after_displacement: int = 3,
+        max_candles_after_raid: int = 5,
+        max_candles_after_displacement: int = 5,
     ) -> None:
         if max_candles_after_raid < 1:
             raise ValueError("max_candles_after_raid must be >= 1")
@@ -180,9 +147,7 @@ class QTRLongHierarchy:
         current_index = execution_5m.market_data.last.index
         self._expire_stale_execution(current_index)
 
-        liquidity_map = self._liquidity_map_engine.build(
-            setup_15m.market_structure_state,
-        )
+        liquidity_map = self._liquidity_map_engine.build(setup_15m.market_structure_state)
 
         if self._raid is None:
             if not liquidity_map.has_sell_side_liquidity:
@@ -259,10 +224,7 @@ class QTRLongHierarchy:
                 return
 
         if self._displacement is not None and self._structure_shift is None:
-            if (
-                current_index
-                > self._displacement.candle.index + self._max_candles_after_displacement
-            ):
+            if current_index > self._displacement.candle.index + self._max_candles_after_displacement:
                 self._reset_execution()
 
     def _execution_details(self, execution_5m: AnalysisContext) -> str:
@@ -272,26 +234,22 @@ class QTRLongHierarchy:
         ]
 
         if self._raid is not None:
-            parts.extend(
-                (
-                    f"raid_index={self._raid.candle.index}",
-                    f"raid_time={self._raid.candle.timestamp.isoformat()}",
-                    f"raid_level={self._raid.level.price:.8f}",
-                    f"raid_extreme={self._raid.extreme_price:.8f}",
-                    f"raid_reclaim={self._raid.reclaim_close:.8f}",
-                )
-            )
+            parts.extend((
+                f"raid_index={self._raid.candle.index}",
+                f"raid_time={self._raid.candle.timestamp.isoformat()}",
+                f"raid_level={self._raid.level.price:.8f}",
+                f"raid_extreme={self._raid.extreme_price:.8f}",
+                f"raid_reclaim={self._raid.reclaim_close:.8f}",
+            ))
 
         if self._displacement is not None:
-            parts.extend(
-                (
-                    f"displacement_index={self._displacement.candle.index}",
-                    f"displacement_time={self._displacement.candle.timestamp.isoformat()}",
-                    f"body_ratio={self._displacement.body_ratio:.4f}",
-                    f"range_expansion={self._displacement.range_expansion:.4f}",
-                    f"close_location={self._displacement.close_location:.4f}",
-                )
-            )
+            parts.extend((
+                f"displacement_index={self._displacement.candle.index}",
+                f"displacement_time={self._displacement.candle.timestamp.isoformat()}",
+                f"body_ratio={self._displacement.body_ratio:.4f}",
+                f"range_expansion={self._displacement.range_expansion:.4f}",
+                f"close_location={self._displacement.close_location:.4f}",
+            ))
 
         state = execution_5m.market_structure_state
         if state is None:
@@ -302,25 +260,21 @@ class QTRLongHierarchy:
         if state.last_choch is None:
             parts.append("last_choch=none")
         else:
-            parts.extend(
-                (
-                    f"last_choch={state.last_choch.type.value}",
-                    f"last_choch_index={state.last_choch.index}",
-                    f"last_choch_time={state.last_choch.timestamp.isoformat()}",
-                    f"last_choch_price={state.last_choch.price:.8f}",
-                )
-            )
+            parts.extend((
+                f"last_choch={state.last_choch.type.value}",
+                f"last_choch_index={state.last_choch.index}",
+                f"last_choch_time={state.last_choch.timestamp.isoformat()}",
+                f"last_choch_price={state.last_choch.price:.8f}",
+            ))
         if state.last_bos is None:
             parts.append("last_bos=none")
         else:
-            parts.extend(
-                (
-                    f"last_bos={state.last_bos.type.value}",
-                    f"last_bos_index={state.last_bos.index}",
-                    f"last_bos_time={state.last_bos.timestamp.isoformat()}",
-                    f"last_bos_price={state.last_bos.price:.8f}",
-                )
-            )
+            parts.extend((
+                f"last_bos={state.last_bos.type.value}",
+                f"last_bos_index={state.last_bos.index}",
+                f"last_bos_time={state.last_bos.timestamp.isoformat()}",
+                f"last_bos_price={state.last_bos.price:.8f}",
+            ))
         return " ".join(parts)
 
     def _reset_execution(self) -> None:
